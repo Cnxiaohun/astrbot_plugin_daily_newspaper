@@ -1,7 +1,7 @@
 name: astrbot_plugin_daily_image_report
 display_name: 每日图报
-desc: 每天早中晚由研究 Agent 联网核实资讯，排成竖版报纸图推送到群里。自用插件。
-short_desc: 早中晚联网研究 + 报纸版式图推送，自用。
+desc: 早 08:00 / 午 12:30 / 晚 19:00 由研究 Agent 经 Responses API 与 web_search 检索当日新增报道，强制要求 completed 搜索调用及逐条 source/url/published_at 才允许出刊；结构化简报编译为逐字文案，交由 gpt-image-2 等模型仅做竖版中文报纸版式排版，生图模型不承担检索与核实。同一天同一时段只生成一次，重复触发直接转发已有版本，仅 /日报 强制 走重新检索；早中晚以 event_key 与标题互斥，同一事件无实质新进展不得复现，只允许标记 UPDATE 的新进展。发送按群持久化收据并区分 sent/sending/uncertain，结果不明不自动重发，进程重启不重发已成功目标。支持主备生图模型、失败阶段回群说明、生成前按当前会话人格口吻告知、可选视觉文字回检（默认关闭）、检索原文与简报留档可追溯；不把模型自述当作核实结论，配图为生成式排版示意而非现场照片。需 AstrBot ≥ 4.29.1 与支持主动消息的 OneBot v11 / NapCat 连接，未绑定群不产生任何 API 调用。
+short_desc: 早中晚联网核实资讯并排成竖版报纸图推群；当天只生成一次，来源可追溯。
 version: v0.1.0
 author: cnxiaohun
 repo: https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report
