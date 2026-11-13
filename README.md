@@ -92,7 +92,7 @@ flowchart LR
 
 ## 第一次使用
 
-需要 AstrBot ≥ 4.29.1、Python ≥ 3.11，群那边得是支持主动消息的 NapCat / OneBot v11（QQ 官方机器人发不了定时推送）。
+需要 AstrBot ≥ 4.29.1、Python ≥ 3.11。**目前只支持 NapCat / OneBot v11（`aiocqhttp`）**——QQ 官方机器人发不了定时推送，Telegram / 飞书还没做适配。
 
 ```text
 # WebUI → 插件 → 从 URL / GitHub 安装
@@ -210,7 +210,7 @@ python tools/preview.py --slot morning --base-url http://127.0.0.1:8000 --output
 
 ## 已知的坑
 
-- 只在 AstrBot 4.29.3 + NapCat 上真跑过；`support_platforms` 里声明了 telegram / lark，但没实测。
+- 只在 AstrBot 4.29.3 + NapCat 上真跑过。`support_platforms` 只声明 `aiocqhttp`；Telegram / 飞书 的主动消息和 UMO 格式理论上都走得通，但群绑定命令现在硬要求 `aiocqhttp`，跨平台适配留到后面做，在那之前别当成支持。
 - 研究要 2–4 分钟，生图再几十秒，所以是「几分钟后到」，不是准点弹出。
 - 去重靠 `event_key` 和标题比对，属于提示层面的机制，不是确定性事实引擎。
 - 竖版靠提示词里显式写「竖版 2:3」，个别网关仍可能返回别的比例，以实际输出为准。

@@ -8,5 +8,3 @@ repo: https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report
 astrbot_version: ">=4.29.1"
 support_platforms:
   - aiocqhttp
-  - telegram
-  - lark
