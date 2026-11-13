@@ -4,7 +4,7 @@ desc: 定时（默认早/中/晚）由研究 Agent 检索核实资讯或按固�
 short_desc: 早中晚联网研究、来源归档与AI示意图报推送。
 version: v0.1.0
 author: 2o48
-repo: ""
+repo: https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report
 astrbot_version: ">=4.29.1"
 support_platforms:
   - aiocqhttp
