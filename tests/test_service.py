@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import tempfile
 import unittest
@@ -25,11 +26,20 @@ TARGET2 = "napcat-instance:GroupMessage:456789"
 def default_config():
     schema = json.loads((Path(__file__).parents[1] / "_conf_schema.json").read_text())
     def defaults(items):
-        return {key: defaults(v["items"]) if v["type"] == "object" else v.get("default") for key, v in items.items()}
+        out = {}
+        for key, v in items.items():
+            value = defaults(v["items"]) if v["type"] == "object" else v.get("default")
+            out[key] = copy.deepcopy(value)
+        return out
     cfg = defaults(schema)
     cfg["api"]["api_key"] = "not-a-real-secret"
-    cfg["schedules"]["morning"]["targets"] = [TARGET]
+    slot_entry(cfg, "morning")["targets"] = [TARGET]
     return cfg
+
+
+def slot_entry(cfg, slot_id):
+    """Fetch one schedule entry from the dynamic template_list form."""
+    return next(x for x in cfg["schedules"] if x["id"] == slot_id)
 
 
 def brief():
@@ -111,7 +121,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_uses_existing_image_for_new_target(self):
         await self.service.run("morning")
-        self.cfg["schedules"]["morning"]["targets"].append(TARGET2)
+        slot_entry(self.cfg, "morning")["targets"].append(TARGET2)
         r = await self.service.run("morning")
         self.assertEqual(r["status"], "success")
         self.assertEqual(self.sent, [TARGET, TARGET2])
@@ -152,7 +162,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("skipped", statuses)
 
     async def test_no_target_costs_nothing(self):
-        self.cfg["schedules"]["morning"]["targets"] = []
+        slot_entry(self.cfg, "morning")["targets"] = []
         with self.assertRaisesRegex(ValueError, "目标群"):
             await self.service.run("morning")
         self.assertEqual(FakeImage.calls, 0)
@@ -219,7 +229,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
             return False
         self.service.sender = unavailable
         r = await self.service.run("morning")
-        self.cfg["schedules"]["morning"]["targets"] = []
+        slot_entry(self.cfg, "morning")["targets"] = []
         with self.assertRaisesRegex(ValueError, "解绑"):
             await self.service.resend(r["run_id"])
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import re
 import sys
 from pathlib import Path
 
@@ -10,7 +11,16 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 
-from .core.config import get_slot, load_slots, validate_targets
+from .core.config import (
+    MAX_SLOTS,
+    SlotConfig,
+    find_slot,
+    get_slot,
+    load_slots,
+    normalize_schedules,
+    validate_targets,
+    write_slots,
+)
 from .core.scheduler import next_time
 from .core.service import ReportService, safe_error
 
@@ -25,6 +35,10 @@ SLOT_ALIASES: dict[str, str] = {
 SLOT_WORD = {"morning": "早报", "noon": "午报", "evening": "晚报"}
 # Actions that must name a slot; anything else there is a typo, not a shortcut.
 SLOT_ACTIONS = {"preview", "run", "force", "enable", "disable", "bind", "unbind"}
+_TIME_TOKEN_RE = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+
+# Actions that legitimately carry free-form arguments instead of a slot token.
+FLEX_ARG_ACTIONS = {"help", "status", "targets", "history", "resend", "list", "add", "time"}
 
 ACTION_ALIASES: dict[str, str] = {
     "帮助": "help", "help": "help", "?": "help", "？": "help",
@@ -39,6 +53,10 @@ ACTION_ALIASES: dict[str, str] = {
     "绑定": "bind", "bind": "bind",
     "解绑": "unbind", "unbind": "unbind",
     "目标": "targets", "targets": "targets",
+    "列表": "list", "清单": "list", "list": "list",
+    "新增": "add", "添加": "add", "加": "add", "add": "add", "new": "add",
+    "删除": "remove", "移除": "remove", "remove": "remove", "del": "remove",
+    "时间": "time", "改时间": "time", "time": "time",
 }
 
 HELP = """每日图报 · 用法
@@ -46,30 +64,35 @@ HELP = """每日图报 · 用法
 
 ▌查看
   /日报                      本帮助
+  /日报 列表                 当前有哪些时段（id、时间、模式、开关、群数）
   /日报 状态                 各时段开关、目标数、下次计划、上次结果
   /日报 历史 [1-20]          最近运行记录与失败原因
   /日报 目标                 当前群绑定了哪些时段
 
-▌生成（时段＝早报 / 午报 / 晚报）
+▌生成（时段用 /日报 列表 里看到的名字）
   /日报 测试 早报            只发到当前会话，不写正式记录
   /日报 立即 早报            发到已绑定群；当天已有图会直接复用
   /日报 早报                 等同「立即」
   /日报 强制 早报            重新检索并生图（会再次计费）
 
-▌管理
+▌时段管理（不限三档，最多 12 档）
+  /日报 新增 夜报 21:30      加一档（默认 agent 模式）
+  /日报 删除 夜报            移除一档
+  /日报 时间 早报 07:30      改时间
   /日报 启用 早报            或 /日报 停用 早报
+
+▌目标群
   /日报 绑定 早报|全部       把当前群加入该时段
   /日报 解绑 早报|全部       从该时段移除当前群
   /日报 重发 <run_id> [确认] 复用旧图重发；「确认」允许重发结果不明的目标
 
 ▌说明
-  时段可写：早报/早/午报/午/晚报/晚，或 morning/noon/evening。
+  时段可写名称或 id；内置三档还支持 早/午/晚、morning/noon/evening。
   旧写法 `/日报测试 早报`、`/日报绑定 全部` 仍可用。
-  定时时段：早报 08:00、午报 12:30、晚报 19:00。
+  默认三档：早报 08:00、午报 12:30、晚报 19:00，都可改可删。
   定时推送只发图片；命令反馈和失败说明是文字。
-  研究/图片提示词、API Key 请在插件 WebUI 配置。
+  模式（agent/static）、研究/图片提示词、API Key 在 WebUI 配置。
 """
-
 
 def _nearest(token: str, candidates: list[str]) -> str:
     match = difflib.get_close_matches(token, candidates, n=1, cutoff=0.4)
@@ -85,6 +108,13 @@ class DailyImageReport(Star):
         self._active_commands: set[asyncio.Task] = set()
 
     async def initialize(self):
+        # 旧版 schedules 是固定三档对象，这里无损转成动态数组并落盘。
+        try:
+            if normalize_schedules(self.config):
+                await self._persist()
+                logger.info("每日图报：已将旧版三档配置迁移为动态时段列表（目标群与提示词原样保留）")
+        except Exception as exc:  # noqa: BLE001 - never let migration kill the plugin
+            logger.error("每日图报：时段配置迁移失败，保持原状：%s", safe_error(exc, self.config))
         data = Path(StarTools.get_data_dir(PLUGIN_NAME))
         self.service = ReportService(self.context, self.config, data, logger=logger)
         try:
@@ -92,7 +122,11 @@ class DailyImageReport(Star):
         except BaseException:
             await self.service.close()
             raise
-        logger.info("每日图报 v0.1.0 已加载：08:00 / 12:30 / 19:00；未绑定目标时不调用付费API")
+        try:
+            plan = " / ".join(f"{x.name} {x.time}" for x in self._slot_list())
+        except Exception:  # noqa: BLE001
+            plan = "配置待修正"
+        logger.info("每日图报 v0.2.0 已加载：%s；未绑定目标时不调用付费API", plan)
 
     async def terminate(self):
         current = asyncio.current_task()
@@ -152,18 +186,36 @@ class DailyImageReport(Star):
             if mapped and not action:
                 action = mapped
                 continue
-            if not slot_token and (key in SLOT_ALIASES or token in {"全部", "all"}):
-                slot_token = SLOT_ALIASES.get(key, token)
+            if not slot_token and self._is_slot_token(token):
+                slot_token = token
                 continue
             extras.append(token)
         return action, slot_token, extras
 
-    def _slot_or_hint(self, token: str):
+    def _is_slot_token(self, token: str) -> bool:
+        """True when the token names a configured slot (or means "every slot")."""
+        if token in {"全部", "all", "所有"}:
+            return True
+        if token.lower() in SLOT_ALIASES:
+            return True
+        try:
+            return find_slot(load_slots(self.config), token) is not None
+        except Exception:  # noqa: BLE001 - invalid config surfaces on the action itself
+            return False
+
+    def _slot_list(self) -> list[SlotConfig]:
+        return load_slots(self.config)
+
+    def _slot_hint(self) -> str:
+        slots = self._slot_list()
+        return "、".join(f"{s.name}({s.time})" for s in slots) or "（当前没有时段）"
+
+    def _slot_or_hint(self, token: str) -> SlotConfig:
         if not token:
-            raise ValueError("请指定时段：早报 / 午报 / 晚报")
-        slot = get_slot(self.config, token)
+            raise ValueError(f"请指定时段：{self._slot_hint()}")
+        slot = find_slot(self._slot_list(), token)
         if slot is None:
-            raise ValueError(f"未知时段「{token}」；可用：早报、午报、晚报")
+            raise ValueError(f"未知时段「{token}」；可用：{self._slot_hint()}")
         return slot
 
     # ------------------------------------------------------------------ 主命令
@@ -189,14 +241,14 @@ class DailyImageReport(Star):
             if action in SLOT_ACTIONS:
                 if not slot_token:
                     if extras:
-                        raise ValueError(f"未知时段「{extras[0]}」；可用：早报、午报、晚报")
-                    suffix = " / 全部" if action in {"bind", "unbind"} else ""
-                    raise ValueError(f"请指定时段：早报 / 午报 / 晚报{suffix}")
+                        raise ValueError(f"未知时段「{extras[0]}」；可用：{self._slot_hint()}")
+                    raise ValueError(f"请指定时段：{self._slot_hint()}"
+                                   + (" 或 全部" if action in {"bind", "unbind"} else ""))
                 if extras:
                     hint = _nearest(extras[0], list(ACTION_ALIASES))
                     extra = f"；是不是「{hint}」？" if hint else ""
                     raise ValueError(f"无法识别的参数「{extras[0]}」{extra}\n/日报 查看全部用法")
-            elif action and action not in {"history", "resend", "help", "status", "targets"} and extras:
+            elif action and action not in FLEX_ARG_ACTIONS and extras:
                 raise ValueError(f"无法识别的参数「{extras[0]}」\n/日报 查看全部用法")
             service = self._ready()
             if action == "status":
@@ -250,10 +302,25 @@ class DailyImageReport(Star):
             elif action in {"enable", "disable"}:
                 slot = self._slot_or_hint(slot_token)
                 async with self._command_lock:
-                    self.config.setdefault("schedules", {}).setdefault(slot.id, {})["enabled"] = action == "enable"
+                    slots = self._slot_list()
+                    for item in slots:
+                        if item.id == slot.id:
+                            item.enabled = action == "enable"
+                    write_slots(self.config, slots)
                     await self._persist()
                 word = "启用" if action == "enable" else "停用"
                 yield event.plain_result(f"{slot.name}已{word}；正在执行的任务使用原配置快照，重载/停用插件可取消")
+            elif action == "list":
+                lines = [f"{i + 1}. {s.name}｜{s.id}｜{s.time}｜{s.mode}｜"
+                         f"{'启用' if s.enabled else '停用'}｜{len(s.targets)}群"
+                         for i, s in enumerate(self._slot_list())]
+                yield event.plain_result("当前时段：\n" + "\n".join(lines))
+            elif action == "add":
+                yield event.plain_result(await self._add_slot(slot_token, extras))
+            elif action == "remove":
+                yield event.plain_result(await self._remove_slot(slot_token))
+            elif action == "time":
+                yield event.plain_result(await self._set_time(slot_token, extras))
             elif action in {"bind", "unbind"}:
                 yield event.plain_result(await self._do_bind(event, action == "unbind", slot_token))
             elif action == "targets":
@@ -318,6 +385,82 @@ class DailyImageReport(Star):
         except Exception as exc:
             yield event.plain_result(safe_error(exc, self.config))
 
+    # ------------------------------------------------------- 时段增删改
+
+    @staticmethod
+    def _slot_id_for(name: str, when: str, existing: list[str]) -> str:
+        """Derive a readable, stable storage id from the name (or its time)."""
+        ascii_part = re.sub(r"[^a-z0-9_]+", "_", name.strip().lower()).strip("_")
+        base = ascii_part if re.fullmatch(r"[a-z][a-z0-9_]{1,23}", ascii_part or "") else f"slot{when.replace(':', '')}"
+        candidate, index = base, 2
+        while candidate in existing:
+            suffix = f"_{index}"
+            candidate = base[: 24 - len(suffix)] + suffix
+            index += 1
+        return candidate
+
+    async def _add_slot(self, slot_token: str, extras: list[str]) -> str:
+        usage = "格式：/日报 新增 <名称> <HH:MM>，例如 /日报 新增 夜报 21:30"
+        # The name may already have been captured as a slot token when it collides
+        # with an existing edition, so reassemble the raw argument list here.
+        tokens = ([slot_token] if slot_token else []) + list(extras)
+        when = next((t for t in tokens if _TIME_TOKEN_RE.fullmatch(t)), "")
+        names = [t for t in tokens if t != when]
+        if not when or len(names) != 1:
+            raise ValueError(usage)
+        name = names[0]
+        async with self._command_lock:
+            slots = self._slot_list()
+            if len(slots) >= MAX_SLOTS:
+                raise ValueError(f"最多 {MAX_SLOTS} 个时段")
+            if find_slot(slots, name):
+                raise ValueError(f"已存在时段「{name}」")
+            existing = [x.id for x in slots]
+            slot = SlotConfig(
+                id=self._slot_id_for(name, when, existing), name=name, enabled=True, time=when,
+                mode="agent", targets=[],
+            )
+            write_slots(self.config, slots + [slot])
+            await self._persist()
+        return (f"已新增 {slot.name}（{slot.time}，agent 模式）。"
+                f"发 /日报 绑定 {slot.name} 选目标群；"
+                "要改模式或提示词去 WebUI 的时段列表。")
+
+    async def _remove_slot(self, token: str) -> str:
+        slot = self._slot_or_hint(token)
+        service = self._ready()
+        if self._lock_busy(slot.id):
+            raise ValueError(f"{slot.name}正在生成，先等它结束或删除该运行后再移除")
+        async with self._command_lock:
+            slots = self._slot_list()
+            if len(slots) <= 1:
+                raise ValueError("至少保留一个时段")
+            kept = [x for x in slots if x.id != slot.id]
+            write_slots(self.config, kept)
+            await self._persist()
+        service.slot_locks.pop(slot.id, None)
+        service._scheduled.discard(slot.id)
+        return f"已删除 {slot.name}（{slot.time}）。历史运行记录仍保留，只是不再定时。"
+
+    async def _set_time(self, token: str, extras: list[str]) -> str:
+        usage = "格式：/日报 时间 <名称> <HH:MM>"
+        slot = self._slot_or_hint(token)
+        when = next((t for t in extras if _TIME_TOKEN_RE.fullmatch(t)), "")
+        if not when or len(extras) != 1:
+            raise ValueError(usage)
+        async with self._command_lock:
+            slots = self._slot_list()
+            for item in slots:
+                if item.id == slot.id:
+                    item.time = when
+            write_slots(self.config, slots)
+            await self._persist()
+        return f"{slot.name} 已改到 {when}。"
+
+    def _lock_busy(self, slot_id: str) -> bool:
+        lock = self._ready().slot_locks.get(slot_id)
+        return bool(lock and lock.locked())
+
     # ------------------------------------------------------------------ 绑定
 
     def _current_group_umo(self, event) -> str:
@@ -340,20 +483,22 @@ class DailyImageReport(Star):
         self._ready()
         umo = self._current_group_umo(event)
         if not slot_token:
-            raise ValueError("请指定时段：早报 / 午报 / 晚报 / 全部")
+            raise ValueError(f"请指定时段：{self._slot_hint()} / 全部")
         if slot_token in {"全部", "all"}:
             slots = load_slots(self.config)
         else:
             slots = [self._slot_or_hint(slot_token)]
         async with self._command_lock:
+            current = {x.id: x for x in self._slot_list()}
             for slot in slots:
-                raw = self.config.setdefault("schedules", {}).setdefault(slot.id, {})
-                targets = list(raw.get("targets") or [])
+                item = current[slot.id]
+                targets = list(item.targets)
                 if remove:
                     targets = [t for t in targets if t != umo]
                 elif umo not in targets:
                     targets.append(umo)
-                raw["targets"] = validate_targets(targets)
+                item.targets = validate_targets(targets)
+            write_slots(self.config, list(current.values()))
             await self._persist()
         word = "解绑" if remove else "绑定"
         tail = "后续发送前也会重新核对绑定。" if remove else "正式推送只发送图片。"

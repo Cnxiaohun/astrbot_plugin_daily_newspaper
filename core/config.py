@@ -5,13 +5,18 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import MAX_PROMPT_CHARS, text
 
-SLOT_IDS = ("morning", "noon", "evening")
+# 保留这三档的内置语义（别名、默认时间、内置模板），但档位集合本身是动态的。
+DEFAULT_SLOT_IDS = ("morning", "noon", "evening")
 SLOT_NAMES = {"morning": "早报", "noon": "午报", "evening": "晚报"}
+DEFAULT_TIMES = {"morning": "08:00", "noon": "12:30", "evening": "19:00"}
+MAX_SLOTS = 12
+_SLOT_ID_RE = re.compile(r"^[a-z][a-z0-9_]{1,23}$")
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _UMO_RE = re.compile(r"^[^:\s]+:GroupMessage:[^:\s]+$")
 _SIZE_RE = re.compile(r"^([1-9]\d{1,4})x([1-9]\d{1,4})$")
@@ -86,6 +91,11 @@ class SlotConfig:
     quality: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not _SLOT_ID_RE.fullmatch(self.id):
+            raise ValueError(f"时段 id「{self.id}」无效：需为 2-24 位小写字母、数字或下划线，且以字母开头")
+        self.name = text(self.name, "schedules[].name", 24)
+        if not self.name:
+            raise ValueError(f"{self.id}.name 不能为空")
         if not isinstance(self.time, str) or not _TIME_RE.fullmatch(self.time):
             raise ValueError(f"{self.name}.time 必须为 HH:MM（00:00..23:59）")
         if self.mode not in ("agent", "static"):
@@ -113,16 +123,13 @@ class SlotConfig:
         return f"{minute} {hour} * * *"
 
 
-def _default_time(slot_id: str) -> str:
-    return {"morning": "08:00", "noon": "12:30", "evening": "19:00"}[slot_id]
-
-
-def _slot_from_dict(slot_id: str, raw: Any) -> SlotConfig:
+def _slot_from_dict(slot_id: str, raw: Any, name: str | None = None) -> SlotConfig:
     raw = _mapping(raw, f"schedules.{slot_id}")
     return SlotConfig(
-        id=slot_id, name=SLOT_NAMES[slot_id],
+        id=slot_id,
+        name=name if name is not None else SLOT_NAMES.get(slot_id, slot_id),
         enabled=_bool(raw.get("enabled", True), f"{slot_id}.enabled"),
-        time=text(raw.get("time", _default_time(slot_id)), f"{slot_id}.time", 5),
+        time=text(raw.get("time", DEFAULT_TIMES.get(slot_id, "08:00")), f"{slot_id}.time", 5),
         mode=text(raw.get("mode", "agent"), f"{slot_id}.mode", 10),
         targets=validate_targets(raw.get("targets", [])),
         research_prompt=text(raw.get("research_prompt", ""), f"{slot_id}.research_prompt", MAX_PROMPT_CHARS),
@@ -192,10 +199,132 @@ def _validate_settings(config: dict[str, Any]) -> None:
             raise ValueError(f"brand.{key} 不能为空")
 
 
+def normalize_schedules(config: dict[str, Any]) -> bool:
+    """Convert the legacy fixed-three object into the dynamic list form.
+
+    Returns True when the config was changed, so the caller can persist it.
+    Bound groups, prompts and enable flags are carried over verbatim.
+    """
+    raw = config.get("schedules")
+    if isinstance(raw, list):
+        return False
+    if not isinstance(raw, dict):
+        raise ValueError("schedules 必须是数组或旧版对象")
+    legacy = raw
+    keys = [k for k in DEFAULT_SLOT_IDS if k in legacy] or list(legacy)
+    items: list[dict[str, Any]] = []
+    for sid in keys:
+        # Legacy entries must be objects; a null/corrupt value is a config error,
+        # not something to silently replace with defaults.
+        if not isinstance(legacy[sid], dict):
+            raise ValueError(f"schedules.{sid} 必须是对象")
+        body = dict(legacy[sid])
+        body.pop("__template_key", None)
+        items.append({
+            "__template_key": "slot",
+            "id": sid,
+            "name": SLOT_NAMES.get(sid, sid),
+            **body,
+        })
+    config["schedules"] = items
+    return True
+
+
+def _slot_from_item(index: int, value: Any) -> SlotConfig:
+    item = _mapping(value, f"schedules[{index}]")
+    sid = text(item.get("id", ""), f"schedules[{index}].id", 24)
+    name = text(item.get("name", SLOT_NAMES.get(sid, sid)), f"schedules[{index}].name", 24)
+    body = {k: v for k, v in item.items() if k not in ("__template_key", "id", "name")}
+    return _slot_from_dict(sid, body, name)
+
+
+def default_slot_items() -> list[dict[str, Any]]:
+    """The three built-in editions, used for a fresh configuration."""
+    return [
+        slot_payload(SlotConfig(id=sid, name=SLOT_NAMES[sid], time=DEFAULT_TIMES[sid]))
+        for sid in DEFAULT_SLOT_IDS
+    ]
+
+
 def load_slots(config: dict[str, Any]) -> list[SlotConfig]:
     _validate_settings(config)
-    schedules = _mapping(config.get("schedules", {}), "schedules")
-    return [_slot_from_dict(sid, schedules.get(sid, {})) for sid in SLOT_IDS]
+    raw = config.get("schedules")
+    if raw is None:
+        # Fresh configuration: seed the built-in three instead of failing.
+        config["schedules"] = default_slot_items()
+        raw = config["schedules"]
+    if isinstance(raw, dict):
+        # Read path must work before the migrated value is persisted.
+        normalize_schedules(config)
+        raw = config["schedules"]
+    if not isinstance(raw, list):
+        raise ValueError("schedules 必须是数组")
+    if not 1 <= len(raw) <= MAX_SLOTS:
+        raise ValueError(f"schedules 需要 1-{MAX_SLOTS} 个时段")
+    slots = [_slot_from_item(i, v) for i, v in enumerate(raw)]
+    ids = [s.id for s in slots]
+    if len(set(ids)) != len(ids):
+        raise ValueError("时段 id 重复")
+    names = [s.name for s in slots]
+    if len(set(names)) != len(names):
+        raise ValueError("时段名称重复")
+    return slots
+
+
+def slot_payload(slot: SlotConfig) -> dict[str, Any]:
+    """Serialize back into the template_list storage form."""
+    return {
+        "__template_key": "slot",
+        "id": slot.id, "name": slot.name, "enabled": slot.enabled, "time": slot.time,
+        "mode": slot.mode, "targets": list(slot.targets),
+        "research_prompt": slot.research_prompt, "image_prompt": slot.image_prompt,
+        "model": slot.model, "size": slot.size, "quality": slot.quality,
+    }
+
+
+def write_slots(config: dict[str, Any], slots: list[SlotConfig]) -> None:
+    config["schedules"] = [slot_payload(s) for s in slots]
+
+
+def find_slot(slots: list[SlotConfig], token: str) -> SlotConfig | None:
+    """Resolve by id, then by display name, then by the three built-in aliases."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    lowered = token.lower()
+    return next(
+        (s for s in slots if lowered == s.id.lower() or token == s.name
+         or SLOT_NAMES.get(s.id) == token
+         or (s.id in DEFAULT_SLOT_IDS and token in {"早", "早上", "上午", "m", "morning"} and s.id == "morning")
+         or (s.id in DEFAULT_SLOT_IDS and token in {"午", "中午", "中", "n", "noon"} and s.id == "noon")
+         or (s.id in DEFAULT_SLOT_IDS and token in {"晚", "晚上", "e", "evening", "pm"} and s.id == "evening")),
+        None,
+    )
+
+
+def previous_edition_time(slots: list[SlotConfig], slot: SlotConfig, now):
+    """Return the previous edition's scheduled datetime and whether it was another slot.
+
+    Slots order by time-of-day; the day's first edition looks back to yesterday's
+    last one. With a single slot the window is the previous 24 hours.
+    """
+    ordered = sorted(slots, key=lambda s: (s.hour_minute, s.id))
+    mine = (slot.hour_minute, slot.id)
+    earlier = [s for s in ordered if (s.hour_minute, s.id) < mine]
+    if earlier:
+        prev = earlier[-1]
+        same_day = True
+    elif len(ordered) > 1:
+        prev = ordered[-1]
+        same_day = False
+    else:
+        prev = slot
+        same_day = False
+    hour, minute = prev.hour_minute
+    value = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if not same_day or value >= now:
+        value -= timedelta(days=1)
+    return value, prev.id != slot.id
 
 
 def validate_config(config: dict[str, Any]) -> None:
@@ -204,8 +333,7 @@ def validate_config(config: dict[str, Any]) -> None:
 
 
 def get_slot(config: dict[str, Any], key: str) -> SlotConfig | None:
-    key = (key or "").strip()
-    return next((slot for slot in load_slots(config) if key in (slot.id, slot.name)), None)
+    return find_slot(load_slots(config), key)
 
 
 RESEARCH_SCHEMA = """{
@@ -273,8 +401,14 @@ DEFAULT_IMAGE_PROMPTS = {
 }
 
 
+# User-added slots have no dedicated built-in text, so they inherit the morning
+# edition's newspaper layout and research rules instead of failing.
+FALLBACK_SLOT_ID = "morning"
+
+
 def get_research_prompt(slot: SlotConfig) -> str:
-    return slot.research_prompt.strip() or DEFAULT_RESEARCH_PROMPTS[slot.id]
+    return slot.research_prompt.strip() or DEFAULT_RESEARCH_PROMPTS.get(
+        slot.id, DEFAULT_RESEARCH_PROMPTS[FALLBACK_SLOT_ID])
 
 
 def get_image_prompt(slot: SlotConfig) -> str:
@@ -282,4 +416,5 @@ def get_image_prompt(slot: SlotConfig) -> str:
         if not slot.image_prompt.strip():
             raise ValueError("static 模式必须自行填写 image_prompt")
         return slot.image_prompt.strip()
-    return slot.image_prompt.strip() or DEFAULT_IMAGE_PROMPTS[slot.id]
+    return slot.image_prompt.strip() or DEFAULT_IMAGE_PROMPTS.get(
+        slot.id, DEFAULT_IMAGE_PROMPTS[FALLBACK_SLOT_ID])

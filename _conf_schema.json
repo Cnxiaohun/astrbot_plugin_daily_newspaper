@@ -155,13 +155,28 @@
     }
   },
   "schedules": {
-    "description": "定时时段（早/中/晚）",
-    "type": "object",
-    "items": {
-      "morning": {
-        "description": "早报（默认 08:00，国际新闻杂志）",
-        "type": "object",
+    "description": "定时时段（可增删，不限三档，最多 12 档）",
+    "type": "template_list",
+    "hint": "每档可独立设置时间、模式、提示词、目标群和生图参数。删除最后一档会被拒绝。",
+    "templates": {
+      "slot": {
+        "name": "定时时段",
+        "display_item": "name",
+        "hide_hint_in_list": true,
+        "hint": "一档定时图报",
         "items": {
+          "id": {
+            "description": "时段 id（小写字母数字下划线，用于运行记录与指令）",
+            "type": "string",
+            "default": "morning",
+            "hint": "改名会让新的运行记录用新 id，历史仍按旧 id 归档；不建议随意改。"
+          },
+          "name": {
+            "description": "时段名称",
+            "type": "string",
+            "default": "早报",
+            "hint": "指令里就用这个名字，例如 /日报 测试 早报。"
+          },
           "enabled": {
             "description": "启用该时段",
             "type": "bool",
@@ -180,142 +195,27 @@
               "static"
             ],
             "default": "agent",
-            "hint": "agent=先联网检索核实再生图；static=固定提示词直接生图。"
+            "hint": "agent=先联网检索核实再生图；static=固定提示词直接生图，必须自填图片提示词。"
           },
           "targets": {
             "description": "目标群会话（UMO）",
             "type": "list",
             "default": [],
             "_special": "umo",
-            "hint": "也可在群内使用 /日报绑定 早报 自动添加。"
+            "hint": "也可在群内使用 /日报 绑定 该时段 自动添加。"
           },
           "research_prompt": {
-            "description": "研究提示词（留空用内置早报模板）",
+            "description": "研究提示词（留空用内置模板）",
             "type": "text",
             "default": ""
           },
           "image_prompt": {
-            "description": "图片提示词模板（agent留空用早报模板；static必须填写）",
-            "hint": "只支持{{变量}}/点路径，不支持Jinja循环。未知变量报错；最多32000字符。",
+            "description": "图片提示词模板（agent 留空用内置报纸模板；static 必填）",
             "type": "text",
             "default": ""
           },
           "model": {
-            "description": "覆盖主模型（留空用全局）",
-            "type": "string",
-            "default": ""
-          },
-          "size": {
-            "description": "覆盖尺寸（留空用全局）",
-            "type": "string",
-            "default": ""
-          },
-          "quality": {
-            "description": "覆盖质量（留空用全局）",
-            "type": "string",
-            "default": ""
-          }
-        }
-      },
-      "noon": {
-        "description": "午报（默认 12:30，财经科技午间快讯）",
-        "type": "object",
-        "items": {
-          "enabled": {
-            "description": "启用该时段",
-            "type": "bool",
-            "default": true
-          },
-          "time": {
-            "description": "每日时间 HH:MM",
-            "type": "string",
-            "default": "12:30"
-          },
-          "mode": {
-            "description": "生成模式",
-            "type": "string",
-            "options": [
-              "agent",
-              "static"
-            ],
-            "default": "agent"
-          },
-          "targets": {
-            "description": "目标群会话（UMO）",
-            "type": "list",
-            "default": [],
-            "_special": "umo"
-          },
-          "research_prompt": {
-            "description": "研究提示词（留空用内置午报模板）",
-            "type": "text",
-            "default": ""
-          },
-          "image_prompt": {
-            "description": "图片提示词模板（agent留空用午报模板；static必须填写）",
-            "hint": "只支持{{变量}}/点路径，不支持Jinja循环。未知变量报错；最多32000字符。",
-            "type": "text",
-            "default": ""
-          },
-          "model": {
-            "description": "覆盖主模型（留空用全局）",
-            "type": "string",
-            "default": ""
-          },
-          "size": {
-            "description": "覆盖尺寸（留空用全局）",
-            "type": "string",
-            "default": ""
-          },
-          "quality": {
-            "description": "覆盖质量（留空用全局）",
-            "type": "string",
-            "default": ""
-          }
-        }
-      },
-      "evening": {
-        "description": "晚报（默认 19:00，今日回顾）",
-        "type": "object",
-        "items": {
-          "enabled": {
-            "description": "启用该时段",
-            "type": "bool",
-            "default": true
-          },
-          "time": {
-            "description": "每日时间 HH:MM",
-            "type": "string",
-            "default": "19:00"
-          },
-          "mode": {
-            "description": "生成模式",
-            "type": "string",
-            "options": [
-              "agent",
-              "static"
-            ],
-            "default": "agent"
-          },
-          "targets": {
-            "description": "目标群会话（UMO）",
-            "type": "list",
-            "default": [],
-            "_special": "umo"
-          },
-          "research_prompt": {
-            "description": "研究提示词（留空用内置晚报模板）",
-            "type": "text",
-            "default": ""
-          },
-          "image_prompt": {
-            "description": "图片提示词模板（agent留空用晚报模板；static必须填写）",
-            "hint": "只支持{{变量}}/点路径，不支持Jinja循环。未知变量报错；最多32000字符。",
-            "type": "text",
-            "default": ""
-          },
-          "model": {
-            "description": "覆盖主模型（留空用全局）",
+            "description": "覆盖主生图模型（留空用全局）",
             "type": "string",
             "default": ""
           },
@@ -331,7 +231,51 @@
           }
         }
       }
-    }
+    },
+    "default": [
+      {
+        "__template_key": "slot",
+        "id": "morning",
+        "name": "早报",
+        "enabled": true,
+        "time": "08:00",
+        "mode": "agent",
+        "targets": [],
+        "research_prompt": "",
+        "image_prompt": "",
+        "model": "",
+        "size": "",
+        "quality": ""
+      },
+      {
+        "__template_key": "slot",
+        "id": "noon",
+        "name": "午报",
+        "enabled": true,
+        "time": "12:30",
+        "mode": "agent",
+        "targets": [],
+        "research_prompt": "",
+        "image_prompt": "",
+        "model": "",
+        "size": "",
+        "quality": ""
+      },
+      {
+        "__template_key": "slot",
+        "id": "evening",
+        "name": "晚报",
+        "enabled": true,
+        "time": "19:00",
+        "mode": "agent",
+        "targets": [],
+        "research_prompt": "",
+        "image_prompt": "",
+        "model": "",
+        "size": "",
+        "quality": ""
+      }
+    ]
   },
   "qa": {
     "description": "图片质量回读检查（可选）",

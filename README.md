@@ -31,6 +31,8 @@
 | 午报 | 12:30 | 上午的财经、产业、AI、能源与监管 |
 | 晚报 | 19:00 | 白天事件的后续，以及明天要盯什么 |
 
+这三档是默认值，不是上限也不是下限——可以删掉午报、加一档 21:30 的夜报，最多 12 档。
+
 WebUI 里就是普通插件的样子：
 
 <a href="docs/images/ui-plugin-detail.webp"><img src="docs/images/ui-plugin-detail.webp" width="720" alt="插件页"></a>
@@ -41,6 +43,7 @@ WebUI 里就是普通插件的样子：
 - **一个时段可以绑多个群。** `targets` 是列表，早报可以只发 A 群、晚报同时发五个群；反过来一个群也能同时收三档。
 - **逐群独立发送收据。** 每个目标单独记 `sent` / `sending` / `uncertain`，五群里有一群发失败只补那一群，已成功的绝不重发。
 - **三档完全独立配置。** 时间、模式、研究提示词、图片提示词、模型、尺寸、质量、目标群各档互不影响。
+- **想加几档加几档。** 早中晚只是默认值，可以删到只剩一档、也可以加到 12 档：`/日报 新增 夜报 21:30`、`/日报 删除 夜报`、`/日报 时间 早报 07:30`，或者在 WebUI 的时段列表里增删。每档的研究窗口自动取「上一档的计划时间」，当天第一档回溯到昨天最后一档，不用自己算。
 - **绑群有三种方式。** 群内发 `/日报 绑定 全部`（自动取当前群，用的是真实群号而不是隔离到个人的会话 ID）、WebUI 的会话来源选择器、或者手填 UMO。
 - **两种生成模式。** `agent` 走联网研究；`static` 用你自己写的固定提示词直接出图，适合节日海报、早安图这类不需要资讯的场景。
 - **主备模型链。** 主模型挂了按 `fallback_image_models` 顺序往下试，运行记录里会写明实际用的是哪个。
@@ -92,7 +95,7 @@ flowchart LR
 
 ## 第一次使用
 
-需要 AstrBot ≥ 4.29.1、Python ≥ 3.11。**目前只支持 NapCat / OneBot v11（`aiocqhttp`）**——QQ 官方机器人发不了定时推送，Telegram / 飞书还没做适配。
+需要 AstrBot ≥ 4.29.1、Python ≥ 3.11。**目前只支持 NapCat / OneBot v11（`aiocqhttp`）**——QQ 官方机器人发不了定时推送，Telegram / 飞书还没做适配（`support_platforms` 里也只声明了 `aiocqhttp`）。
 
 ```text
 # WebUI → 插件 → 从 URL / GitHub 安装
@@ -126,12 +129,16 @@ Docker 里的 AstrBot 注意 `127.0.0.1` 指容器自己，要换成宿主地址
 | `/日报 测试 早报` | 只发当前会话，不记正式账 |
 | `/日报 立即 早报`（或 `/日报 早报`） | 发绑定群，当天出过就复用 |
 | `/日报 强制 早报` | 重新检索重新画，**会再扣一次费** |
+| `/日报 列表` | 当前所有档位（名称、id、时间、模式、开关、群数） |
 | `/日报 启用 早报` / `停用 早报` | 开关单档 |
+| `/日报 新增 夜报 21:30` | 加一档（默认 agent 模式） |
+| `/日报 删除 夜报` | 删一档；最后一档和正在生成的档不允许删 |
+| `/日报 时间 早报 07:30` | 改时间 |
 | `/日报 绑定 早报` / `绑定 全部` | 当前群加入该档 |
 | `/日报 解绑 早报` / `解绑 全部` | 当前群移出该档 |
 | `/日报 重发 <run_id> [确认]` | 拿旧图重发；`确认` 才动「结果不明」的群 |
 
-时段写 `早/早报/早上`、`午/午报/中午`、`晚/晚报/晚上` 都认，`morning/noon/evening` 也认；老写法 `/日报测试 早报` 还在。
+自定义档位直接用它的名称或 id（`/日报 测试 夜报`）。内置三档还额外认 `早/午/晚`、`morning/noon/evening` 这些简写；老写法 `/日报测试 早报` 也还在。
 
 参数拼错会告诉你「是不是想打『强制』」，而不是闷头执行——一次强制就是真金白银。
 
@@ -152,12 +159,13 @@ Docker 里的 AstrBot 注意 `127.0.0.1` 指容器自己，要换成宿主地址
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `schedules.morning.time` | `08:00` | HH:MM |
-| `schedules.morning.mode` | `agent` | `agent` 联网研究；`static` 用固定提示词（得自己填 `image_prompt`） |
-| `schedules.morning.targets` | `[]` | 目标群 UMO 列表，群内 `/日报 绑定` 会写进来 |
-| `schedules.morning.research_prompt` | 空 | 留空走内置早报模板 |
-| `schedules.morning.image_prompt` | 空 | 留空走内置报纸版式模板 |
-| `schedules.morning.model` / `size` / `quality` | 空 | 单档覆盖全局生图参数 |
+| `schedules[].time` | `08:00` | 每档的时间，HH:MM；档位数量可增删（1-12） |
+| `schedules[].mode` | `agent` | `agent` 联网研究；`static` 用固定提示词（得自己填 `image_prompt`） |
+| `schedules[].id` / `name` | — | 档位 id 与名称；id 用小写字母数字下划线，改名会让新运行记录用新 id |
+| `schedules[].targets` | `[]` | 目标群 UMO 列表，可多个；群内 `/日报 绑定` 会写进来 |
+| `schedules[].research_prompt` | 空 | 留空走内置早报模板 |
+| `schedules[].image_prompt` | 空 | 留空走内置报纸版式模板 |
+| `schedules[].model` / `size` / `quality` | 空 | 单档覆盖全局生图参数 |
 | `api.base_url` / `api_key` | `http://127.0.0.1:8000` / 空 | OpenAI 兼容网关（我用 Magpie） |
 | `api.size` | `1024x1536` | 有的网关不听话，记录以实际输出为准 |
 | `api.fallback_image_models` | `["hunyuan-image-alpha"]` | 兜底顺序；混元带平台水印，去不掉 |
@@ -222,6 +230,7 @@ python tools/preview.py --slot morning --base-url http://127.0.0.1:8000 --output
 - **Magpie**（[yetone/magpie](https://github.com/yetone/magpie)）—— 本地模型网关。`gpt-image-2`、`hunyuan-image-alpha` 和带 `web_search` 的 Responses 请求都从它那儿中转，整套「研究 + 排版」链路才能只靠 OpenAI 兼容接口跑通。
 - **Qoder** —— 大量实现和重构在 Qoder 的 Agent 里完成，重试策略、并发锁、安全边界都出自那里。
 - **DeepSeek** —— 长上下文审代码、推演边界情况，替我挡掉了不少坑。
+- **NapCat** —— 每天真正把这些图送进群的是它。插件只依赖 OneBot v11 的主动消息能力，但整套东西是在 NapCat 上跑通并日常使用的，所以单独谢一句。
 
 以及 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 本体，插件文档写得挺清楚。README 的写法参考了 [记忆日记](https://github.com/mrzhsz3210/astrbot_plugin_memory_diary)——原来插件说明可以这么写。
 

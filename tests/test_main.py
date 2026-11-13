@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from test_service import default_config
+from test_service import default_config, slot_entry
 
 
 def load_entry():
@@ -104,6 +104,12 @@ def fake_service(run):
 
 
 class Config(dict):
+    """Minimal AstrBotConfig stand-in: records that a save was requested."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.saved = False
+
     def save_config(self):
         self.saved = True
 
@@ -149,7 +155,7 @@ class MainTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(is_preview, command)
 
     async def test_bare_slot_means_publish_now(self):
-        self.cfg["schedules"]["morning"]["targets"] = ["bot-instance:GroupMessage:123"]
+        slot_entry(self.cfg, "morning")["targets"] = ["bot-instance:GroupMessage:123"]
         calls = []
         async def run(slot, **kwargs):
             calls.append((slot, kwargs))
@@ -165,14 +171,14 @@ class MainTests(unittest.IsolatedAsyncioTestCase):
         event = Event("/日报 绑定 全部")
         messages = [r async for r in self.plugin.report(event)]
         self.assertIn("已绑定", messages[0])
-        for slot in self.cfg["schedules"].values():
+        for slot in self.cfg["schedules"]:
             self.assertIn("bot-instance:GroupMessage:123", slot["targets"])
 
     async def test_unbind_via_unified_action(self):
-        self.cfg["schedules"]["morning"]["targets"] += ["bot-instance:GroupMessage:123"]
+        slot_entry(self.cfg, "morning")["targets"] += ["bot-instance:GroupMessage:123"]
         messages = [r async for r in self.plugin.report(Event("/日报 解绑 早报"))]
         self.assertIn("已解绑", messages[0])
-        self.assertNotIn("bot-instance:GroupMessage:123", self.cfg["schedules"]["morning"]["targets"])
+        self.assertNotIn("bot-instance:GroupMessage:123", slot_entry(self.cfg, "morning")["targets"])
 
     async def test_typo_is_rejected_not_silently_published(self):
         calls = []
@@ -202,17 +208,17 @@ class MainTests(unittest.IsolatedAsyncioTestCase):
         responses = [r async for r in self.plugin.bind(event)]
         self.assertTrue(event.stopped)
         self.assertTrue(self.cfg.saved)
-        for slot in self.cfg["schedules"].values():
+        for slot in self.cfg["schedules"]:
             self.assertIn("bot-instance:GroupMessage:123", slot["targets"])
             self.assertNotIn(event.unified_msg_origin, slot["targets"])
         self.assertIn("已绑定", responses[0])
 
     async def test_unbind_removes_only_current_group(self):
-        self.cfg["schedules"]["morning"]["targets"] += ["bot-instance:GroupMessage:123"]
+        slot_entry(self.cfg, "morning")["targets"] += ["bot-instance:GroupMessage:123"]
         event = Event("/日报解绑 早报")
         responses = [r async for r in self.plugin.unbind(event)]
-        self.assertNotIn("bot-instance:GroupMessage:123", self.cfg["schedules"]["morning"]["targets"])
-        self.assertIn("napcat-instance:GroupMessage:123456", self.cfg["schedules"]["morning"]["targets"])
+        self.assertNotIn("bot-instance:GroupMessage:123", slot_entry(self.cfg, "morning")["targets"])
+        self.assertIn("napcat-instance:GroupMessage:123456", slot_entry(self.cfg, "morning")["targets"])
         self.assertIn("已解绑", responses[0])
 
     async def test_preview_success_emits_no_extra_text(self):
@@ -234,7 +240,7 @@ class MainTests(unittest.IsolatedAsyncioTestCase):
         async def run(slot, **kwargs):
             calls.append(kwargs)
             return {"status": "success"}
-        self.cfg["schedules"]["noon"]["targets"] = ["bot-instance:GroupMessage:123"]
+        slot_entry(self.cfg, "noon")["targets"] = ["bot-instance:GroupMessage:123"]
         self.plugin.service, tasks = fake_service(run)
         _ = [r async for r in self.plugin.report(Event("/日报 强制 午报"))]
         await asyncio.gather(*tasks)

@@ -14,14 +14,14 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .announce import announce
-from .config import SLOT_IDS, get_slot, load_slots, validate_config, validate_targets
+from .config import get_slot, load_slots, previous_edition_time, validate_config, validate_targets
 from .delivery import send_alert, send_image
 from .http_utils import AmbiguousRequestError, ConnectionFailure
 from .image_client import ImageClient
 from .prompt_builder import PromptBuilder, now_parts
 from .qa import check_image
 from .research import ResearchClient
-from .scheduler import is_due, scheduled_time
+from .scheduler import is_due
 from .store import Store
 
 
@@ -39,12 +39,17 @@ def safe_error(exc: BaseException, config: dict) -> str:
 
 
 def research_window(slot_id: str, now: datetime, config: dict) -> datetime:
-    """Adjacent cutoffs in configured local time; overlap is resolved via history."""
-    slots = {s.id: s for s in load_slots(config)}
-    prev = {"morning": "evening", "noon": "morning", "evening": "noon"}[slot_id]
-    value = scheduled_time(slots[prev], now)
-    while value >= now:
-        value -= timedelta(days=1)
+    """Start of the window covered by this edition: the previous edition's time.
+
+    Slots are dynamic, so the predecessor is whichever enabled slot is scheduled
+    just before this one by time-of-day (wrapping to yesterday). With a single
+    slot the window is the previous 24 hours. Overlap is resolved via history.
+    """
+    slots = load_slots(config)
+    slot = next((x for x in slots if x.id == slot_id), None)
+    if slot is None:
+        raise ValueError(f"未知时段 {slot_id}")
+    value, _ = previous_edition_time(slots, slot, now)
     return value
 
 
@@ -65,7 +70,7 @@ class ReportService:
         self.image_factory = image_factory
         self.qa_checker = qa_checker
         self.announcer = announcer
-        self.slot_locks = {sid: asyncio.Lock() for sid in SLOT_IDS}
+        self.slot_locks: dict[str, asyncio.Lock] = {}
         self.capacity = asyncio.Semaphore((config.get("limits") or {}).get("max_concurrent_generations", 1))
         self.quota_lock = asyncio.Lock()
         self.tasks: set[asyncio.Task] = set()
@@ -80,6 +85,10 @@ class ReportService:
         await self.store.recover()
         if schedule:
             self._scheduler_task = self.spawn(self._scheduler(), "daily-report-scheduler")
+
+    def _lock_for(self, slot_id: str) -> asyncio.Lock:
+        """Locks are created on demand because the slot set is dynamic."""
+        return self.slot_locks.setdefault(slot_id, asyncio.Lock())
 
     def spawn(self, coro, name: str) -> asyncio.Task:
         if self._closed:
@@ -176,9 +185,10 @@ class ReportService:
         slot = get_slot(self.config, slot_id)
         if slot is None:
             raise ValueError("未知时段；使用 早报、午报、晚报")
-        if self.slot_locks[slot.id].locked():
+        lock = self._lock_for(slot.id)
+        if lock.locked():
             raise ValueError(f"{slot.name}已有任务在运行，请等结束后再试")
-        async with self.slot_locks[slot.id], self.capacity:
+        async with lock, self.capacity:
             # Take one immutable snapshot and clock for this edition, even across midnight.
             cfg = copy.deepcopy(dict(self.config))
             validate_config(cfg)
@@ -411,7 +421,7 @@ class ReportService:
             raise ValueError("未知时段")
         # Everything decision-related is re-read INSIDE the per-slot lock so two
         # concurrent resend commands cannot both act on stale "uncertain" state.
-        async with self.slot_locks[slot.id]:
+        async with self._lock_for(slot.id):
             if not self.config.get("enabled", True):
                 raise ValueError("插件停用中，不能重发")
             record = self.store.get(run_id)

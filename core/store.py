@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-_RUN_ID = re.compile(r"^\d{8}-(morning|noon|evening)-[0-9a-f]{12}$")
+_RUN_ID = re.compile(r"^\d{8}-([a-z][a-z0-9_]{1,23})-[0-9a-f]{12}$")
 
 
 def _fsync_dir(path: Path) -> None:
