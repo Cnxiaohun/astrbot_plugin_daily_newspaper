@@ -1,5 +1,7 @@
 <div align="center">
 
+[![Release](https://img.shields.io/github/v/release/Cnxiaohun/astrbot_plugin_daily_image_report?label=release)](https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report/releases)
+
 <img src="docs/images/avatar.webp" width="150" alt="每日图报">
 
 # 每日图报
