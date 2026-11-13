@@ -1,11 +1,12 @@
 # 变更日志
 
-## v0.2.0（含重命名）
+## v0.2.1
 
-> 插件在这版改了名字：仓库 `astrbot_plugin_daily_image_report` → `astrbot_plugin_daily_newspaper`，
-> 中文名「每日图报」→「每日报纸」。GitHub 旧地址会自动重定向到新地址。
-> 升级时插件会把旧数据目录（`plugin_data/astrbot_plugin_daily_image_report`）里的
-> 去重历史与发送收据迁到新目录；**插件配置需要重新填一次**（AstrBot 的配置文件路径跟着插件名走）。
+> 这版只做了一件破坏性的事：改名字。
+> 仓库 `astrbot_plugin_daily_image_report` → `astrbot_plugin_daily_newspaper`，
+> 中文名「每日图报」→「每日报纸」。GitHub 旧地址会自动重定向。
+> 升级时插件会把旧数据目录里的去重历史与发送收据迁到新目录；
+> **插件配置要重新填一次**，因为 AstrBot 的配置文件路径跟着插件名走。
 
 ## v0.2.0
 
