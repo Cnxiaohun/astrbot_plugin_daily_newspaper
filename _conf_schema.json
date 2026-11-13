@@ -1,0 +1,473 @@
+{
+  "enabled": {
+    "description": "启用每日图报插件",
+    "type": "bool",
+    "default": true
+  },
+  "timezone": {
+    "description": "调度时区（IANA 名称）",
+    "type": "string",
+    "default": "Asia/Shanghai",
+    "hint": "所有时段按此IANA时区解释；无效时区会拒绝加载，不会回落到系统时区。"
+  },
+  "alert_umo": {
+    "description": "失败告警会话（留空则只写日志）",
+    "type": "string",
+    "default": "",
+    "_special": "umo",
+    "hint": "运行失败时向该会话发送一条简短告警文本。"
+  },
+  "api": {
+    "description": "生图 API（OpenAI Images 兼容）",
+    "type": "object",
+    "items": {
+      "base_url": {
+        "description": "API 根地址（不含 /v1）",
+        "type": "string",
+        "default": "http://127.0.0.1:8000",
+        "hint": "OpenAI 兼容网关地址，如 http://127.0.0.1:8000 或 https://api.openai.com。AstrBot 在 Docker 内时不要用 127.0.0.1，改用宿主地址或 host.docker.internal。"
+      },
+      "api_key": {
+        "description": "API Key",
+        "type": "string",
+        "default": "",
+        "secret": true
+      },
+      "image_model": {
+        "description": "主生图模型",
+        "type": "string",
+        "default": "gpt-image-2"
+      },
+      "fallback_image_models": {
+        "description": "备用生图模型（按顺序尝试）",
+        "type": "list",
+        "default": [
+          "hunyuan-image-alpha"
+        ]
+      },
+      "size": {
+        "description": "默认尺寸（宽x高 或 auto）",
+        "type": "string",
+        "default": "1024x1536",
+        "hint": "部分网关不严格遵守请求尺寸，插件以实际输出为准。"
+      },
+      "quality": {
+        "description": "默认生成质量",
+        "type": "string",
+        "options": [
+          "low",
+          "medium",
+          "high",
+          "auto"
+        ],
+        "default": "medium"
+      },
+      "timeout_seconds": {
+        "description": "单次生图请求超时（秒，10..1800）",
+        "type": "int",
+        "slider": {
+          "min": 10,
+          "max": 1800,
+          "step": 10
+        },
+        "default": 300
+      },
+      "extra_body": {
+        "description": "透传给生图接口的额外参数",
+        "type": "dict",
+        "default": {},
+        "hint": "如 output_format、background 等；不能覆盖 model/prompt/n/stream，必须是有效JSON对象。"
+      }
+    }
+  },
+  "research": {
+    "description": "资讯研究 Agent（Responses API 兼容）",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用研究 Agent（agent 模式时段使用）",
+        "type": "bool",
+        "default": true
+      },
+      "base_url": {
+        "description": "研究 API 根地址（留空复用生图 base_url）",
+        "type": "string",
+        "default": ""
+      },
+      "api_key": {
+        "description": "研究 API Key（留空复用生图 api_key）",
+        "type": "string",
+        "default": "",
+        "secret": true
+      },
+      "model": {
+        "description": "研究模型（需支持联网搜索）",
+        "type": "string",
+        "default": "codex/gpt-6.1-sol"
+      },
+      "web_search": {
+        "description": "请求中附带 web_search 工具",
+        "type": "bool",
+        "default": true
+      },
+      "timeout_seconds": {
+        "description": "研究请求超时（秒，10..1800）",
+        "type": "int",
+        "slider": {
+          "min": 10,
+          "max": 1800,
+          "step": 10
+        },
+        "default": 240
+      },
+      "max_repair_retries": {
+        "description": "JSON/证据/日期校验失败后的修复次数（0..3）",
+        "type": "int",
+        "slider": {
+          "min": 0,
+          "max": 3,
+          "step": 1
+        },
+        "default": 1
+      },
+      "retry_on_timeout": {
+        "description": "研究超时/断连时自动重试一次",
+        "type": "bool",
+        "default": true,
+        "hint": "研究请求超时或连接中断时，等待 15 秒重试一次（研究不发送任何消息，重试代价低）。内容校验失败不会在此重试。"
+      }
+    }
+  },
+  "brand": {
+    "description": "刊头与品牌标识",
+    "type": "object",
+    "items": {
+      "edition": {
+        "description": "刊名",
+        "type": "string",
+        "default": "THE WORLD TODAY｜寰球三刻"
+      },
+      "handle": {
+        "description": "右上角固定标识",
+        "type": "string",
+        "default": "@吴某的乐子群"
+      }
+    }
+  },
+  "schedules": {
+    "description": "定时时段（早/中/晚）",
+    "type": "object",
+    "items": {
+      "morning": {
+        "description": "早报（默认 08:00，国际新闻杂志）",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用该时段",
+            "type": "bool",
+            "default": true
+          },
+          "time": {
+            "description": "每日时间 HH:MM",
+            "type": "string",
+            "default": "08:00"
+          },
+          "mode": {
+            "description": "生成模式",
+            "type": "string",
+            "options": [
+              "agent",
+              "static"
+            ],
+            "default": "agent",
+            "hint": "agent=先联网检索核实再生图；static=固定提示词直接生图。"
+          },
+          "targets": {
+            "description": "目标群会话（UMO）",
+            "type": "list",
+            "default": [],
+            "_special": "umo",
+            "hint": "也可在群内使用 /日报绑定 早报 自动添加。"
+          },
+          "research_prompt": {
+            "description": "研究提示词（留空用内置早报模板）",
+            "type": "text",
+            "default": ""
+          },
+          "image_prompt": {
+            "description": "图片提示词模板（agent留空用早报模板；static必须填写）",
+            "hint": "只支持{{变量}}/点路径，不支持Jinja循环。未知变量报错；最多32000字符。",
+            "type": "text",
+            "default": ""
+          },
+          "model": {
+            "description": "覆盖主模型（留空用全局）",
+            "type": "string",
+            "default": ""
+          },
+          "size": {
+            "description": "覆盖尺寸（留空用全局）",
+            "type": "string",
+            "default": ""
+          },
+          "quality": {
+            "description": "覆盖质量（留空用全局）",
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
+      "noon": {
+        "description": "午报（默认 12:30，财经科技午间快讯）",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用该时段",
+            "type": "bool",
+            "default": true
+          },
+          "time": {
+            "description": "每日时间 HH:MM",
+            "type": "string",
+            "default": "12:30"
+          },
+          "mode": {
+            "description": "生成模式",
+            "type": "string",
+            "options": [
+              "agent",
+              "static"
+            ],
+            "default": "agent"
+          },
+          "targets": {
+            "description": "目标群会话（UMO）",
+            "type": "list",
+            "default": [],
+            "_special": "umo"
+          },
+          "research_prompt": {
+            "description": "研究提示词（留空用内置午报模板）",
+            "type": "text",
+            "default": ""
+          },
+          "image_prompt": {
+            "description": "图片提示词模板（agent留空用午报模板；static必须填写）",
+            "hint": "只支持{{变量}}/点路径，不支持Jinja循环。未知变量报错；最多32000字符。",
+            "type": "text",
+            "default": ""
+          },
+          "model": {
+            "description": "覆盖主模型（留空用全局）",
+            "type": "string",
+            "default": ""
+          },
+          "size": {
+            "description": "覆盖尺寸（留空用全局）",
+            "type": "string",
+            "default": ""
+          },
+          "quality": {
+            "description": "覆盖质量（留空用全局）",
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
+      "evening": {
+        "description": "晚报（默认 19:00，今日回顾）",
+        "type": "object",
+        "items": {
+          "enabled": {
+            "description": "启用该时段",
+            "type": "bool",
+            "default": true
+          },
+          "time": {
+            "description": "每日时间 HH:MM",
+            "type": "string",
+            "default": "19:00"
+          },
+          "mode": {
+            "description": "生成模式",
+            "type": "string",
+            "options": [
+              "agent",
+              "static"
+            ],
+            "default": "agent"
+          },
+          "targets": {
+            "description": "目标群会话（UMO）",
+            "type": "list",
+            "default": [],
+            "_special": "umo"
+          },
+          "research_prompt": {
+            "description": "研究提示词（留空用内置晚报模板）",
+            "type": "text",
+            "default": ""
+          },
+          "image_prompt": {
+            "description": "图片提示词模板（agent留空用晚报模板；static必须填写）",
+            "hint": "只支持{{变量}}/点路径，不支持Jinja循环。未知变量报错；最多32000字符。",
+            "type": "text",
+            "default": ""
+          },
+          "model": {
+            "description": "覆盖主模型（留空用全局）",
+            "type": "string",
+            "default": ""
+          },
+          "size": {
+            "description": "覆盖尺寸（留空用全局）",
+            "type": "string",
+            "default": ""
+          },
+          "quality": {
+            "description": "覆盖质量（留空用全局）",
+            "type": "string",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
+  "qa": {
+    "description": "图片质量回读检查（可选）",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用视觉回读检查",
+        "type": "bool",
+        "default": false,
+        "hint": "用视觉模型核对刊头/日期/标识/标题是否齐全，失败自动重试一次。会增加耗时与成本。"
+      },
+      "model": {
+        "description": "视觉模型（留空复用研究模型）",
+        "type": "string",
+        "default": ""
+      },
+      "retry_on_fail": {
+        "description": "检查不通过时的重试次数（0..2）",
+        "type": "int",
+        "slider": {
+          "min": 0,
+          "max": 2,
+          "step": 1
+        },
+        "default": 1
+      }
+    }
+  },
+  "announce": {
+    "description": "生成前用机器人当前人设口吻在群里告知一声",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "生成/转发前发送一条简短文字告知",
+        "type": "bool",
+        "default": true,
+        "hint": "正式图报本身仍只发图片；这里只是开始前一两句提示，失败不影响生成。"
+      },
+      "use_persona": {
+        "description": "用当前会话人格改写告知语",
+        "type": "bool",
+        "default": true,
+        "hint": "会调用当前聊天模型做一次很短的改写；失败自动退回原句。"
+      },
+      "timeout_seconds": {
+        "description": "人格改写超时（秒）",
+        "type": "int",
+        "slider": {
+          "min": 1,
+          "max": 120,
+          "step": 1
+        },
+        "default": 25
+      },
+      "scheduled_text": {
+        "description": "定时自动任务的告知模板",
+        "type": "text",
+        "default": "开始制作 {{date}}（{{weekday}}）{{time}} 的{{slot_name}}，稍后把图片端上来～"
+      },
+      "manual_text": {
+        "description": "手动 测试/预览/立即 的告知模板",
+        "type": "text",
+        "default": "马上开始制作 {{date}}（{{weekday}}）{{time}} 的{{slot_name}}，完成后把图片发到这里～"
+      },
+      "force_text": {
+        "description": "手动 强制 重新生成的告知模板",
+        "type": "text",
+        "default": "收到强制重做，马上重新生成 {{date}}（{{weekday}}）{{time}} 的{{slot_name}}，会重新检索并排版，请稍等～"
+      },
+      "reuse_text": {
+        "description": "当天已有版本、直接转发时的告知模板",
+        "type": "text",
+        "default": "{{date}}（{{weekday}}）的{{slot_name}}今天已经做好啦，直接把这一版发过来～"
+      },
+      "notify_on_failure": {
+        "description": "生成失败时在群里说明一句",
+        "type": "bool",
+        "default": true,
+        "hint": "告知已发出但后续失败时，发一条简短说明（含失败阶段与原因摘要），避免群里只看到告知没有任何下文。"
+      }
+    }
+  },
+  "limits": {
+    "description": "运行限制与保留策略",
+    "type": "object",
+    "items": {
+      "max_runs_per_day": {
+        "description": "每天最多运行次数（0=不限，上限1000）",
+        "type": "int",
+        "slider": {
+          "min": 0,
+          "max": 1000,
+          "step": 1
+        },
+        "default": 12
+      },
+      "max_concurrent_generations": {
+        "description": "同时进行的生图任务数（1..8）",
+        "type": "int",
+        "slider": {
+          "min": 1,
+          "max": 8,
+          "step": 1
+        },
+        "default": 1
+      },
+      "retention_days": {
+        "description": "运行记录与图片保留天数（1..365）",
+        "type": "int",
+        "slider": {
+          "min": 1,
+          "max": 365,
+          "step": 1
+        },
+        "default": 7
+      },
+      "catchup_window_minutes": {
+        "description": "错过定时后的补发窗口（分钟，0=不补，最多720）",
+        "type": "int",
+        "slider": {
+          "min": 0,
+          "max": 720,
+          "step": 1
+        },
+        "default": 30
+      },
+      "stale_run_minutes": {
+        "description": "运行恢复判断超时（分钟，1..1440）",
+        "type": "int",
+        "slider": {
+          "min": 1,
+          "max": 1440,
+          "step": 1
+        },
+        "default": 15
+      }
+    }
+  }
+}

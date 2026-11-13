@@ -1,0 +1,12 @@
+name: astrbot_plugin_daily_image_report
+display_name: 每日图报
+desc: 定时（默认早/中/晚）由研究 Agent 检索核实资讯或按固定提示词，调用 OpenAI Images 兼容端点生成中文信息图并推送到指定群。
+short_desc: 早中晚联网研究、来源归档与AI示意图报推送。
+version: v0.1.0
+author: 2o48
+repo: ""
+astrbot_version: ">=4.29.1"
+support_platforms:
+  - aiocqhttp
+  - telegram
+  - lark
