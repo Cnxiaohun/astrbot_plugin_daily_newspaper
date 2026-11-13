@@ -59,7 +59,7 @@ async def _persona_rewrite(context, umo: str, base_text: str, timeout: int,
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - never block generation
-        logger.warning("每日图报人设告知改写失败，改用原句：%s", type(exc).__name__)
+        logger.warning("每日报纸人设告知改写失败，改用原句：%s", type(exc).__name__)
         return base_text
 
 
@@ -107,8 +107,8 @@ async def announce(
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                log.warning("每日图报告知发送失败：%s", type(exc).__name__)
+                log.warning("每日报纸告知发送失败：%s", type(exc).__name__)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001
-        log.warning("每日图报告知流程失败（不影响生成）：%s", type(exc).__name__)
+        log.warning("每日报纸告知流程失败（不影响生成）：%s", type(exc).__name__)

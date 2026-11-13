@@ -1,6 +1,6 @@
 {
   "enabled": {
-    "description": "启用每日图报插件",
+    "description": "启用每日报纸插件",
     "type": "bool",
     "default": true
   },

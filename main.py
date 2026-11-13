@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -24,7 +25,8 @@ from .core.config import (
 from .core.scheduler import next_time
 from .core.service import ReportService, safe_error
 
-PLUGIN_NAME = "astrbot_plugin_daily_image_report"
+PLUGIN_NAME = "astrbot_plugin_daily_newspaper"
+LEGACY_PLUGIN_NAME = "astrbot_plugin_daily_image_report"
 
 # Every user-facing synonym maps to one canonical slot id.
 SLOT_ALIASES: dict[str, str] = {
@@ -59,7 +61,7 @@ ACTION_ALIASES: dict[str, str] = {
     "时间": "time", "改时间": "time", "time": "time",
 }
 
-HELP = """每日图报 · 用法
+HELP = """每日报纸 · 用法
 统一写法：/日报 <动作> [时段]，动作和时段顺序随意。
 
 ▌查看
@@ -112,10 +114,18 @@ class DailyImageReport(Star):
         try:
             if normalize_schedules(self.config):
                 await self._persist()
-                logger.info("每日图报：已将旧版三档配置迁移为动态时段列表（目标群与提示词原样保留）")
+                logger.info("每日报纸：已将旧版三档配置迁移为动态时段列表（目标群与提示词原样保留）")
         except Exception as exc:  # noqa: BLE001 - never let migration kill the plugin
-            logger.error("每日图报：时段配置迁移失败，保持原状：%s", safe_error(exc, self.config))
+            logger.error("每日报纸：时段配置迁移失败，保持原状：%s", safe_error(exc, self.config))
         data = Path(StarTools.get_data_dir(PLUGIN_NAME))
+        # 插件改过一次名，旧数据目录里有去重历史与发送收据，先搬过来再用。
+        try:
+            moved = self._migrate_legacy_data(data)
+        except Exception as exc:  # noqa: BLE001 - 迁移失败不该拦住启动
+            logger.warning("%s：旧数据目录迁移失败，将使用新目录：%s", CN_NEW, safe_error(exc, self.config))
+            moved = False
+        if moved:
+            logger.info("%s：已把旧数据目录的历史与收据迁移到新目录", CN_NEW)
         self.service = ReportService(self.context, self.config, data, logger=logger)
         try:
             await self.service.start()
@@ -126,7 +136,7 @@ class DailyImageReport(Star):
             plan = " / ".join(f"{x.name} {x.time}" for x in self._slot_list())
         except Exception:  # noqa: BLE001
             plan = "配置待修正"
-        logger.info("每日图报 v0.2.0 已加载：%s；未绑定目标时不调用付费API", plan)
+        logger.info("每日报纸 v0.2.0 已加载：%s；未绑定目标时不调用付费API", plan)
 
     async def terminate(self):
         current = asyncio.current_task()
@@ -137,6 +147,28 @@ class DailyImageReport(Star):
         if self.service is not None:
             await self.service.close()
             self.service = None
+
+    def _migrate_legacy_data(self, target: Path) -> bool:
+        """Copy run history from the pre-rename data directory, once.
+
+        Only runs when the new directory has no state yet and the legacy one
+        still exists, so it can never overwrite current data.
+        """
+        if (target / "state.json").exists():
+            return False
+        legacy = target.parent / LEGACY_PLUGIN_NAME
+        if legacy == target or not legacy.is_dir() or not (legacy / "state.json").exists():
+            return False
+        # The in-flight lock file must not be copied; everything else is history.
+        for item in legacy.iterdir():
+            if item.name in {".instance.lock"}:
+                continue
+            dest = target / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dest)
+        return True
 
     def _ready(self) -> ReportService:
         if self.service is None:
@@ -223,9 +255,9 @@ class DailyImageReport(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("日报", priority=sys.maxsize)
     async def report(self, event: AstrMessageEvent):
-        """管理每日图报：状态、测试、立即、强制、历史、重发、启停、绑定。"""
+        """管理每日报纸：状态、测试、立即、强制、历史、重发、启停、绑定。"""
         event.stop_event()
-        logger.info("每日图报命令：%s", (event.message_str or "")[:200])
+        logger.info("每日报纸命令：%s", (event.message_str or "")[:200])
         task = asyncio.current_task()
         self._active_commands.add(task)
         try:
@@ -253,7 +285,7 @@ class DailyImageReport(Star):
             service = self._ready()
             if action == "status":
                 now = service.clock()
-                lines = [f"每日图报｜{self.config.get('timezone', 'Asia/Shanghai')}｜总开关：{self.config.get('enabled', True)}"]
+                lines = [f"每日报纸｜{self.config.get('timezone', 'Asia/Shanghai')}｜总开关：{self.config.get('enabled', True)}"]
                 for slot in load_slots(self.config):
                     latest = next((r for r in service.store.recent(100) if r["slot_id"] == slot.id and not r.get("preview")), None)
                     last = f"{latest['status']} {latest['run_id']}" if latest else "尚无正式运行"
@@ -332,7 +364,7 @@ class DailyImageReport(Star):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            yield event.plain_result("每日图报：" + safe_error(exc, self.config))
+            yield event.plain_result("每日报纸：" + safe_error(exc, self.config))
         finally:
             self._active_commands.discard(task)
 
@@ -344,9 +376,9 @@ class DailyImageReport(Star):
             return
         if not event.is_admin():
             event.stop_event()
-            yield event.plain_result("您没有权限使用每日图报指令。")
+            yield event.plain_result("您没有权限使用每日报纸指令。")
             return
-        logger.info("每日图报 slash fallback：%s", msg[:200])
+        logger.info("每日报纸 slash fallback：%s", msg[:200])
         event.message_str = msg[1:].strip()
         async for result in self.report(event):
             yield result

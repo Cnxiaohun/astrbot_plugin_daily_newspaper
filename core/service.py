@@ -102,7 +102,7 @@ class ReportService:
     def _task_done(self, task: asyncio.Task) -> None:
         self.tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
-            self.logger.error("每日图报后台任务异常：%s", safe_error(task.exception(), self.config))
+            self.logger.error("每日报纸后台任务异常：%s", safe_error(task.exception(), self.config))
 
     async def close(self) -> None:
         self._closed = True
@@ -122,7 +122,7 @@ class ReportService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.logger.error("每日图报调度检查失败：%s", safe_error(exc, self.config))
+                self.logger.error("每日报纸调度检查失败：%s", safe_error(exc, self.config))
             await asyncio.sleep(25)
 
     async def tick(self) -> None:
@@ -176,7 +176,7 @@ class ReportService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            self.logger.warning("每日图报告知失败（不影响生成）：%s", type(exc).__name__)
+            self.logger.warning("每日报纸告知失败（不影响生成）：%s", type(exc).__name__)
 
     async def run(self, slot_id: str, *, preview_target: str = "", force: bool = False,
                   action: str = "scheduled") -> dict:
@@ -269,7 +269,7 @@ class ReportService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self.logger.warning("每日图报失败通知发送失败：%s", type(exc).__name__)
+                self.logger.warning("每日报纸失败通知发送失败：%s", type(exc).__name__)
 
     async def _pipeline(self, slot, now: datetime, cfg: dict, record: dict, force: bool) -> dict:
         api = cfg.get("api") or {}
@@ -449,9 +449,9 @@ class ReportService:
         if not target:
             return
         try:
-            text = f"每日图报 {record['slot_name']} {record['run_id']}\n阶段：{record.get('stage')}\n{record.get('error', '')}"
+            text = f"每日报纸 {record['slot_name']} {record['run_id']}\n阶段：{record.get('stage')}\n{record.get('error', '')}"
             value = self.alerter(self.context, target, text)
             if inspect.isawaitable(value):
                 await value
         except Exception as exc:
-            self.logger.warning("每日图报告警发送失败：%s", safe_error(exc, cfg))
+            self.logger.warning("每日报纸告警发送失败：%s", safe_error(exc, cfg))

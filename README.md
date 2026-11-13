@@ -1,10 +1,10 @@
 <div align="center">
 
-[![Release](https://img.shields.io/github/v/release/Cnxiaohun/astrbot_plugin_daily_image_report?label=release)](https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report/releases)
+[![Release](https://img.shields.io/github/v/release/Cnxiaohun/astrbot_plugin_daily_newspaper?label=release)](https://github.com/Cnxiaohun/astrbot_plugin_daily_newspaper/releases)
 
-<img src="docs/images/avatar.webp" width="150" alt="每日图报">
+<img src="docs/images/avatar.webp" width="150" alt="每日报纸">
 
-# 每日图报
+# 每日报纸
 
 <sub>每天准点给群里送一份报纸。</sub>
 
@@ -99,11 +99,11 @@ flowchart LR
 
 ```text
 # WebUI → 插件 → 从 URL / GitHub 安装
-https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report
+https://github.com/Cnxiaohun/astrbot_plugin_daily_newspaper
 
 # 或者手动
 cd AstrBot/data/plugins
-git clone https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report
+git clone https://github.com/Cnxiaohun/astrbot_plugin_daily_newspaper
 ```
 
 1. 插件配置里填 `api.base_url` 和 `api.api_key`；没绑群时它一次 API 都不会调，填错 key 也只会在生成时报错，不会偷偷扣费；
@@ -186,7 +186,7 @@ Docker 里的 AstrBot 注意 `127.0.0.1` 指容器自己，要换成宿主地址
 
 ## 数据与安全
 
-东西都存在 `AstrBot/data/plugin_data/astrbot_plugin_daily_image_report/`：
+东西都存在 `AstrBot/data/plugin_data/astrbot_plugin_daily_newspaper/`：
 
 ```text
 state.json                     运行索引 + 逐群发送收据

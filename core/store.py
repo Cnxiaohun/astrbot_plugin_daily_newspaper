@@ -82,7 +82,7 @@ class Store:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             f.close()
-            raise RuntimeError("同一数据目录已有每日图报实例运行，拒绝重复启动") from exc
+            raise RuntimeError("同一数据目录已有每日报纸实例运行，拒绝重复启动") from exc
         self._lease = f
 
     def release(self) -> None:
