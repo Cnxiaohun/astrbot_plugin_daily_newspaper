@@ -12,6 +12,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
 
+from . import __version__
 from .core.config import (
     MAX_SLOTS,
     SlotConfig,
@@ -136,7 +137,7 @@ class DailyImageReport(Star):
             plan = " / ".join(f"{x.name} {x.time}" for x in self._slot_list())
         except Exception:  # noqa: BLE001
             plan = "配置待修正"
-        logger.info("每日报纸 v0.2.0 已加载：%s；未绑定目标时不调用付费API", plan)
+        logger.info("每日报纸 v%s 已加载：%s；未绑定目标时不调用付费API", __version__, plan)
 
     async def terminate(self):
         current = asyncio.current_task()

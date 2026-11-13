@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+import re
 import sys
 import types
 import unittest
@@ -54,6 +55,11 @@ def load_entry():
     for name in ("astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.star", "astrbot.api.message_components", "daily_plugin_test"):
         modules[name] = types.ModuleType(name)
     modules["daily_plugin_test"].__path__ = [str(Path(__file__).parents[1])]
+    # main.py 里 `from . import __version__`，桩包需要这个属性。
+    _init = Path(__file__).parents[1] / "__init__.py"
+    modules["daily_plugin_test"].__version__ = re.search(
+        r'__version__\s*=\s*"([\d.]+)"', _init.read_text(encoding="utf-8")
+    ).group(1)
     modules["astrbot.api"].AstrBotConfig = dict
     modules["astrbot.api"].logger = logging.getLogger("main-contract")
     eventmod = modules["astrbot.api.event"]

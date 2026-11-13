@@ -91,6 +91,22 @@ class InitializeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(calls.get("start"))
             self.assertEqual(calls["data"].name, ENTRY.PLUGIN_NAME)
 
+    def test_versions_agree_everywhere(self):
+        """metadata / __init__ / 启动日志不能各说各话。"""
+        import re
+        from pathlib import Path as P
+
+        root = P(__file__).parents[1]
+        meta = (root / "metadata.yaml").read_text(encoding="utf-8")
+        init = (root / "__init__.py").read_text(encoding="utf-8")
+        main = (root / "main.py").read_text(encoding="utf-8")
+        meta_v = re.search(r"^version:\s*v?([\d.]+)", meta, flags=re.M).group(1)
+        init_v = re.search(r"__version__\s*=\s*\"([\d.]+)\"", init).group(1)
+        self.assertEqual(meta_v, init_v)
+        # 启动日志必须走 __version__，不能再硬编码。
+        self.assertIn("每日报纸 v%s 已加载", main)
+        self.assertNotRegex(main, r"每日报纸 v\d\.\d+\.\d+ 已加载")
+
 
 if __name__ == "__main__":
     unittest.main()
