@@ -122,10 +122,10 @@ class DailyImageReport(Star):
         try:
             moved = self._migrate_legacy_data(data)
         except Exception as exc:  # noqa: BLE001 - 迁移失败不该拦住启动
-            logger.warning("%s：旧数据目录迁移失败，将使用新目录：%s", CN_NEW, safe_error(exc, self.config))
+            logger.warning("每日报纸：旧数据目录迁移失败，将使用新目录：%s", safe_error(exc, self.config))
             moved = False
         if moved:
-            logger.info("%s：已把旧数据目录的历史与收据迁移到新目录", CN_NEW)
+            logger.info("每日报纸：已把旧数据目录的历史与收据迁移到新目录")
         self.service = ReportService(self.context, self.config, data, logger=logger)
         try:
             await self.service.start()

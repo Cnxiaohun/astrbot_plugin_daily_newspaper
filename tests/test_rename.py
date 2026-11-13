@@ -59,5 +59,38 @@ class RenameTests(unittest.TestCase):
             self.assertFalse(self.plugin._migrate_legacy_data(target))
 
 
+class InitializeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_initialize_actually_runs(self):
+        """initialize() 必须能真跑一遍：占位符这类错误只有在这里才会暴露。"""
+        import tempfile
+        from unittest.mock import AsyncMock, patch
+
+        from test_service import default_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = test_main.Config(default_config())
+            plugin = ENTRY.DailyImageReport(None, cfg)
+            calls = {}
+
+            class FakeService:
+                def __init__(self, context, config, data, logger=None):
+                    calls["data"] = data
+
+                async def start(self, **kwargs):
+                    calls["start"] = True
+
+                async def close(self):
+                    calls["close"] = True
+
+            with patch.object(ENTRY, "ReportService", FakeService), \
+                 patch.object(ENTRY, "StarTools") as tools, \
+                 patch.object(ENTRY.DailyImageReport, "_persist", new=AsyncMock()):
+                tools.get_data_dir.return_value = Path(tmp) / ENTRY.PLUGIN_NAME
+                await plugin.initialize()
+
+            self.assertTrue(calls.get("start"))
+            self.assertEqual(calls["data"].name, ENTRY.PLUGIN_NAME)
+
+
 if __name__ == "__main__":
     unittest.main()
