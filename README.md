@@ -4,175 +4,176 @@
 
 # 每日图报
 
-给自己的 QQ 群做一份每天准点送达的「报纸」。
+<sub>每天准点给群里送一份报纸。</sub>
 
-<sub>AstrBot 插件 · 早 08:00 / 午 12:30 / 晚 19:00 · 研究 Agent 联网核实 → 生成竖版报纸图 → 推群</sub>
+**AstrBot 插件：早中晚三档定时，研究 Agent 联网核实当日资讯，编译成逐字文案后交给生图模型排成竖版中文报纸，只发图片到绑定的群。**
 
 </div>
 
 ---
 
-## 先说清楚
+自用插件，跑在我自己的 AstrBot 上，每天往「吴某的乐子群」发早报、午报、晚报。顺手开源，主要是留个备份，换机器时不用重写一遍。
 
-这是我**自己用**的插件，跑在自己群的 AstrBot 上，每天往「**吴某的乐子群**」发早报、午报、晚报。写出来顺手开源，主要是留个备份，也方便以后换机器重装。
+默认配置是围着我这个群调的（刊名、右上角群名、三档时间），你换环境要改。它也不是通用资讯推送器，没打算做成大而全的东西。
 
-所以：
+## 效果
 
-- 默认配置都是围着我这一个群调的（刊名、右上角 `@吴某的乐子群`、三个时段），你要用得改一遍；
-- 它不是「通用资讯推送器」，我也不打算做成大而全的产品；
-- 代码里没什么花活，就是把「查资料 → 排版 → 发图」这条链路走稳，别每天翻车。
-
-## 它长这样
-
-群里收到的是这样一张竖版图（1024×1536，手机上直接看）：
+1024×1536 竖版报纸图：
 
 <a href="docs/images/sample-morning.webp"><img src="docs/images/sample-morning.webp" width="300" alt="早报样张"></a>
 <a href="docs/images/sample-noon.webp"><img src="docs/images/sample-noon.webp" width="300" alt="午报样张"></a>
 
-三个时段侧重不一样：
-
-| 时段 | 时间 | 内容 |
+| 时段 | 默认时间 | 侧重 |
 |---|---|---|
-| 早报 | 08:00 | 昨夜至今晨的国际要闻，政治外交 / 战争安全 / 灾害 / 经济 / 科技 / 社会文化，外加历史上的今天 |
-| 午报 | 12:30 | 上午的财经、产业、科技 AI、能源与监管动向 |
-| 晚报 | 19:00 | 白天事件的后续结果、社会文化、明日关注 |
+| 早报 | 08:00 | 昨夜到今晨的国际要闻，外加历史上的今天 |
+| 午报 | 12:30 | 上午的财经、产业、AI、能源与监管 |
+| 晚报 | 19:00 | 白天事件的后续，以及明天要盯什么 |
 
-在 AstrBot WebUI 里就是普通插件，指令也都是常规命令：
+WebUI 里就是普通插件的样子：
 
-<a href="docs/images/ui-plugin-detail.webp"><img src="docs/images/ui-plugin-detail.webp" width="720" alt="AstrBot WebUI 中的每日图报"></a>
+<a href="docs/images/ui-plugin-detail.webp"><img src="docs/images/ui-plugin-detail.webp" width="720" alt="插件页"></a>
+<a href="docs/images/ui-plugin-info.webp"><img src="docs/images/ui-plugin-info.webp" width="720" alt="插件信息"></a>
 
-## 一个前提：生图模型不会查新闻
+## 能力清单
 
-这点值得单独写，因为踩过坑。
+- **一个时段可以绑多个群。** `targets` 是列表，早报可以只发 A 群、晚报同时发五个群；反过来一个群也能同时收三档。
+- **逐群独立发送收据。** 每个目标单独记 `sent` / `sending` / `uncertain`，五群里有一群发失败只补那一群，已成功的绝不重发。
+- **三档完全独立配置。** 时间、模式、研究提示词、图片提示词、模型、尺寸、质量、目标群各档互不影响。
+- **绑群有三种方式。** 群内发 `/日报 绑定 全部`（自动取当前群，用的是真实群号而不是隔离到个人的会话 ID）、WebUI 的会话来源选择器、或者手填 UMO。
+- **两种生成模式。** `agent` 走联网研究；`static` 用你自己写的固定提示词直接出图，适合节日海报、早安图这类不需要资讯的场景。
+- **主备模型链。** 主模型挂了按 `fallback_image_models` 顺序往下试，运行记录里会写明实际用的是哪个。
+- **当天只出一次。** 同一天同一档重复触发不再调 API，直接转发已有那张；只有 `/日报 强制` 会重新检索重新画。
+- **跨刊去重。** 早中晚之间传递当天已出刊的标题和 `event_key`，同一件事没有新进展不许再占版面，标 `UPDATE` 才放行。
+- **失败不沉默。** 生成失败会在群里说明卡在哪个阶段、原因摘要、怎么重试；另外可以配 `alert_umo` 把失败单独发给管理员。
+- **开工前用人格说一声。** 调一次很短的模型请求，把「开始做 12:30 的午报」换成群里那个人设的语气，改不动就退回原句。
+- **全程留档。** `brief.json`（结构化简报）、`evidence.json`（原始搜索调用与来源）、`research_prompt.txt` / `image_prompt.txt`（实际发出的提示词）、`meta.json`（模型、耗时、token、图片尺寸与哈希）。
+- **可选视觉回检。** 打开 `qa.enabled` 后用视觉模型核对图上的刊头、日期、群标识和标题是否齐全，不通过就不发群。
+- **错过会补，但只在窗口内。** 重启或卡住导致错过定时，`catchup_window_minutes`（默认 30 分钟）内补一次，超过就不补——不会半夜突然弹出早报。
+- **成本有闸。** `max_runs_per_day`、`max_concurrent_generations`、整个运行的硬超时 `stale_run_minutes`；研究超时会自动重试一次，生图超时不重试。
 
-`gpt-image-2`、`hunyuan-image-alpha` 这类文生图模型**不联网、不能核实**。直接让它「画今天的新闻」，它会一本正经编出看起来合理、但查无此事的标题。所以链路是拆开的：
+## 一条前提
+
+生图模型不联网。你让它「画今天的新闻」，它会编出三条看着挺像那么回事、实际查无此事的标题——这坑我踩过。所以查和画是拆开的：
 
 ```mermaid
 flowchart LR
-    A[定时触发] --> B{当天已生成?}
-    B -- 是 --> R[直接转发已有那版]
-    B -- 否 --> C[研究 Agent<br/>Responses API + web_search]
-    C --> D[结构化简报<br/>带来源 URL / 发布时间]
+    A[定时触发] --> B{当天出过没}
+    B -- 出过 --> R[直接转发那一版]
+    B -- 没出 --> C[研究 Agent<br/>Responses API + web_search]
+    C --> D[结构化简报<br/>带 source / url / published_at]
     D --> E[编译成逐字文案]
-    E --> F[生图模型只负责排版]
-    F --> G[可选视觉回检]
-    G --> H[发送到群，只发图片]
+    E --> F[生图模型只管排版]
+    F --> G[发群，只发图]
 ```
 
-**查和写归研究模型，画归生图模型。** 简报里每条重点新闻都带 `source` / `url` / `published_at`，研究请求必须真的出现 `completed` 的 `web_search_call`，否则直接判失败 —— 宁可当天不出报，也不发编的新闻。
+研究请求里必须真的出现 `completed` 的 `web_search_call`，每条新闻都得带来源链接和发布时间，否则当天判失败、不出报。
 
-即便这样，模型仍会误读、错归因、引用旧稿。插件保证的是「可追溯」，不是「已核实」，敏感内容还请自己抽查。
+还是那句：插件保证的是**可追溯**，不是已核实。模型照样会误读、会引旧稿，敏感内容自己抽查。
 
-## 装上试试
+顺带一提，我这里 `gpt-image-2`、`hunyuan-image-alpha` 和研究用的 `codex/gpt-6.1-sol` 都不是直连官方 API，而是走 [Magpie](https://github.com/yetone/magpie) 这个本地网关中转出来的 OpenAI 兼容端点。插件只认 `base_url`，所以换官方 API、换 New API、换自建代理都行，不用改代码。
 
-要求 AstrBot ≥ 4.29.1、Python ≥ 3.11，群里需要支持主动消息的 NapCat / OneBot v11 连接（QQ 官方机器人不支持定时推送）。
+## 第一次使用
+
+需要 AstrBot ≥ 4.29.1、Python ≥ 3.11，群那边得是支持主动消息的 NapCat / OneBot v11（QQ 官方机器人发不了定时推送）。
 
 ```text
-# WebUI → 插件 → 从 URL / GitHub 安装，填：
+# WebUI → 插件 → 从 URL / GitHub 安装
 https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report
 
-# 或手动放目录
+# 或者手动
 cd AstrBot/data/plugins
 git clone https://github.com/Cnxiaohun/astrbot_plugin_daily_image_report
 ```
 
-然后在插件配置里填两样：
+1. 插件配置里填 `api.base_url` 和 `api.api_key`；没绑群时它一次 API 都不会调，填错 key 也只会在生成时报错，不会偷偷扣费；
+2. 想改刊名和右上角标识，动 `brand.edition` / `brand.handle`；
+3. 到目标群里用管理员身份发 `/日报 绑定 全部`；
+4. 发 `/日报 测试 早报` 试一张，只回到当前会话、不写正式发送记录，之后正式跑仍会正常生成（预览会算进 `max_runs_per_day`）；
+5. 满意就等着，或者发 `/日报 立即 早报` 直接推群。
 
-| 配置项 | 说明 |
-|---|---|
-| `api.base_url` | OpenAI 兼容网关地址，默认 `http://127.0.0.1:8000` |
-| `api.api_key` | 你自己的 key，**不要**提交进仓库 |
+Docker 里的 AstrBot 注意 `127.0.0.1` 指容器自己，要换成宿主地址或 `host.docker.internal`。
 
-> AstrBot 跑在 Docker 里时，`127.0.0.1` 指的是容器自己，得换成宿主地址或 `host.docker.internal`。
-
-最后在群里用管理员身份绑定：
-
-```text
-/日报 绑定 全部      # 把当前群加入三个时段
-/日报 测试 早报      # 先试一张，只发到当前会话
-/日报 状态
-```
-
-**没绑定群之前不会产生任何 API 调用**，这点可以放心。
+**没绑群之前一次 API 都不会调**，不用担心装完就开始烧钱。
 
 ## 指令
 
-统一写法 `/日报 <动作> [时段]`，**动作和时段顺序随便**，`/日报 测试 早报` 和 `/日报 早报 测试` 效果一样。
+`/日报 <动作> [时段]`，动作和时段谁在前都行——`/日报 测试 早报` 和 `/日报 早报 测试` 是一回事。
 
-| 指令 | 干什么 |
+| 指令 | 用途 |
 |---|---|
 | `/日报` | 帮助 |
-| `/日报 状态` | 各时段开关、目标数、下次计划、上次结果 |
-| `/日报 历史 [1-20]` | 最近运行记录、`run_id`、失败原因 |
-| `/日报 目标` | 当前群绑了哪些时段 |
-| `/日报 测试 早报` | 只发到当前会话，不写正式记录 |
-| `/日报 立即 早报` / `/日报 早报` | 发到已绑定群，当天已有图就复用 |
-| `/日报 强制 早报` | 重新检索并生图（**会再计费**），唯一绕过「当天只生成一次」的入口 |
-| `/日报 启用 早报` / `停用 早报` | 开关单个时段 |
-| `/日报 绑定 早报` / `绑定 全部` | 当前群加入该时段 |
-| `/日报 解绑 早报` / `解绑 全部` | 从该时段移除当前群 |
-| `/日报 重发 <run_id> [确认]` | 复用旧图重发；带 `确认` 才允许重发「结果不明」的目标 |
+| `/日报 状态` | 各档开关、目标数、下次几点、上次结果 |
+| `/日报 历史 [1-20]` | 运行记录、`run_id`、失败原因 |
+| `/日报 目标` | 这个群绑了哪几档 |
+| `/日报 测试 早报` | 只发当前会话，不记正式账 |
+| `/日报 立即 早报`（或 `/日报 早报`） | 发绑定群，当天出过就复用 |
+| `/日报 强制 早报` | 重新检索重新画，**会再扣一次费** |
+| `/日报 启用 早报` / `停用 早报` | 开关单档 |
+| `/日报 绑定 早报` / `绑定 全部` | 当前群加入该档 |
+| `/日报 解绑 早报` / `解绑 全部` | 当前群移出该档 |
+| `/日报 重发 <run_id> [确认]` | 拿旧图重发；`确认` 才动「结果不明」的群 |
 
-时段能写 `早报/早/早上`、`午报/午/中午`、`晚报/晚/晚上`，也能写 `morning/noon/evening`。旧写法 `/日报测试 早报`、`/日报绑定 全部` 也还能用。
+时段写 `早/早报/早上`、`午/午报/中午`、`晚/晚报/晚上` 都认，`morning/noon/evening` 也认；老写法 `/日报测试 早报` 还在。
 
-拼错不会被当成「立即发布」—— 比如 `/日报 强制重做 早报` 会提示「无法识别的参数『强制重做』；是不是『强制』？」，不会偷偷扣一次生图费用。
+参数拼错会告诉你「是不是想打『强制』」，而不是闷头执行——一次强制就是真金白银。
 
-## 几个我自己在意的细节
+## 备用模型
 
-**当天只生成一次。** 同一天同一时段，第二次触发不再调 API，而是把已经做好的那版转发出来。想重做只有 `/日报 强制` 一条路。
+主模型挂了会按 `api.fallback_image_models` 顺序兜底。**混元（`hunyuan-image-alpha`）同样实测跑通过**，但不是官方承诺的适配目标，也是经 Magpie 中转拿到的——中文排版照样能出：
 
-**不重复发。** 每个群每次发送都有持久化收据，`sent` / `sending` / `uncertain` 分得清楚。发送时抛异常会记成 `uncertain` 并且**不自动重发** —— 宁可不补，也不要群里出现两张一样的报纸。进程重启也不会重发已成功的。
+<a href="docs/images/sample-hunyuan.webp"><img src="docs/images/sample-hunyuan.webp" width="300" alt="hunyuan-image-alpha 样张"></a>
 
-**失败不再沉默。** 早期版本告知发出去、生成失败，群里就再没下文了（我自己踩过一次：早上看到提示，图一直没来）。现在失败会补一句卡在哪个阶段、原因摘要、怎么重试。
+两点区别：它返回图片 URL 而不是 base64（插件自动下载，只允许公网地址、不带 `Authorization`）；右下角带 `AI生成 WORKBUDDY` 平台水印，插件去不掉。所以它适合当兜底，别当主力。
 
-**跨刊去重。** 早/午/晚之间会传递当天已出刊物的标题和 `event_key`，同一事件没有实质新进展不许重复出现，只有标 `UPDATE` 才能再写一遍。
-
-**生成前先用当前人格说一声。** 会调一次很短的模型请求，把「开始做 2026-11-12（星期四）12:30 的午报」改写成群里那个人格的口吻；改不动就退回原句，不影响生成。正式推送仍然只发图片。
+其他 OpenAI Images 兼容端点理论上都能用，模型名随便填，但我只在 Magpie 上验证过这两个。
 
 ## 配置速查
 
 <details>
-<summary><code>schedules</code> / <code>announce</code> / <code>research</code> 常用项</summary>
+<summary>常用项</summary>
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `schedules.morning.time` | `08:00` | 时段 HH:MM |
-| `schedules.morning.mode` | `agent` | `agent` 联网研究；`static` 用固定提示词（需自填 `image_prompt`） |
-| `schedules.morning.targets` | `[]` | 目标群 UMO，群内 `/日报 绑定` 会自动填 |
-| `schedules.morning.research_prompt` | 空 | 留空用内置早报模板 |
-| `schedules.morning.image_prompt` | 空 | 留空用内置报纸版式模板 |
-| `api.size` | `1024x1536` | 竖版；部分网关不严格遵守，记录以实际输出为准 |
-| `api.fallback_image_models` | `["hunyuan-image-alpha"]` | 主模型失败时按顺序兜底 |
-| `research.model` | `codex/gpt-6.1-sol` | 需要支持 Responses API 的 `web_search` |
-| `research.timeout_seconds` | `240` | 研究超时；超时会自动重试一次 |
-| `announce.enabled` | `true` | 生成前是否在群里说一声 |
-| `announce.use_persona` | `true` | 是否用当前人格改写告知语 |
-| `announce.notify_on_failure` | `true` | 失败是否在群里说明 |
-| `qa.enabled` | `false` | 视觉回检图片文字，会增加耗时和成本 |
-| `limits.max_concurrent_generations` | `1` | 同时进行的生图任务数 |
+| `schedules.morning.time` | `08:00` | HH:MM |
+| `schedules.morning.mode` | `agent` | `agent` 联网研究；`static` 用固定提示词（得自己填 `image_prompt`） |
+| `schedules.morning.targets` | `[]` | 目标群 UMO 列表，群内 `/日报 绑定` 会写进来 |
+| `schedules.morning.research_prompt` | 空 | 留空走内置早报模板 |
+| `schedules.morning.image_prompt` | 空 | 留空走内置报纸版式模板 |
+| `schedules.morning.model` / `size` / `quality` | 空 | 单档覆盖全局生图参数 |
+| `api.base_url` / `api_key` | `http://127.0.0.1:8000` / 空 | OpenAI 兼容网关（我用 Magpie） |
+| `api.size` | `1024x1536` | 有的网关不听话，记录以实际输出为准 |
+| `api.fallback_image_models` | `["hunyuan-image-alpha"]` | 兜底顺序；混元带平台水印，去不掉 |
+| `research.model` | `codex/gpt-6.1-sol` | 需支持 Responses API 的 `web_search` |
+| `research.timeout_seconds` | `240` | 超时会自动重试一次 |
+| `alert_umo` | 空 | 失败单独通知这个会话 |
+| `announce.enabled` / `use_persona` / `notify_on_failure` | `true` | 开工前说一声、用人格改写、失败也说明 |
+| `qa.enabled` | `false` | 视觉回检图上的字，费时间也费钱 |
+| `limits.max_runs_per_day` | `12` | 每天最多跑几次（预览也算） |
+| `limits.max_concurrent_generations` | `1` | 并发生图数 |
+| `limits.catchup_window_minutes` | `30` | 错过定时后的补发窗口 |
+| `limits.stale_run_minutes` | `15` | 整个运行的硬超时 |
+| `limits.retention_days` | `7` | 留档保留天数 |
 
-模板占位符用 `{{date}}`、`{{slot_name}}`、`{{cover.headline}}` 这类双花括号，只做简单替换，**不支持循环和条件**；写错的占位符会直接报错，不会静默变空。
+模板里是 `{{date}}`、`{{slot_name}}`、`{{cover.headline}}` 这种双花括号，只做替换，不支持循环和条件。写错的占位符直接报错，不会悄悄变成空的。
 
 </details>
 
 ## 数据与安全
 
-数据在 `AstrBot/data/plugin_data/astrbot_plugin_daily_image_report/`：
+东西都存在 `AstrBot/data/plugin_data/astrbot_plugin_daily_image_report/`：
 
 ```text
-state.json                     运行索引与发送收据
+state.json                     运行索引 + 逐群发送收据
 runs/20261112-morning-xxxxxxxx/
-    meta.json  brief.json  evidence.json
-    research_prompt.txt  image_prompt.txt  image.png  qa.json
+    meta.json  brief.json  evidence.json  qa.json
+    research_prompt.txt  image_prompt.txt  image.png
 ```
 
-默认保留 7 天。`state.json` 损坏时插件会拒绝启动而不是重置 —— 去重历史丢了比不启动更危险。
+默认留 7 天。`state.json` 坏了插件会拒绝启动而不是重置——去重历史和发送收据丢了，比不启动更麻烦。
 
-几个刻意的取舍：
+同一份数据目录带进程锁，不会有两个实例同时跑；但**不提供跨机分布式锁**，别多台机器共享这个目录。
 
-- API Key 只存在 AstrBot 配置里，插件不写日志、不写运行元数据、不进仓库；配置里的 `secret: true` 只是 WebUI 遮罩，并不加密；
-- 生图返回的图片 URL 只允许公网地址，下载不带 `Authorization`，限制大小与重定向；
-- 管理指令要求 AstrBot 管理员权限，不把 QQ 群管自动当成机器人管理员。
+API Key 只存在 AstrBot 配置里，不写日志、不进运行元数据、不进仓库（配置里的 `secret: true` 只是 WebUI 遮罩，不加密）。管理指令要 AstrBot 管理员权限，QQ 群管不算。
 
 ## 测试
 
@@ -180,27 +181,31 @@ runs/20261112-morning-xxxxxxxx/
 python -m unittest discover -s tests    # 95 项
 ```
 
-覆盖了并发重发不重复、研究失败不降级编造、SSRF 拦截、收据持久化、拼错指令不误发布这些我认为最容易出事的地方。跑真实 API 的预览脚本在 `tools/preview.py`，**只生成不发群**：
+覆盖了并发重发不重复、研究失败不降级编造新闻、SSRF 拦截、收据持久化、拼错指令不误发布这些最容易出事的地方。
+
+想拿真 API 试但不发群，用 `tools/preview.py`：
 
 ```bash
 export DAILY_REPORT_API_KEY='你的key'
 python tools/preview.py --slot morning --base-url http://127.0.0.1:8000 --output ./preview-output
 ```
 
-## 已知不足
+## 已知的坑
 
-- 只在 AstrBot 4.29.3 + NapCat 上真机跑过，其他平台没验证；
-- 研究这一步要 2–4 分钟，加上生图几十秒，**从触发到收到图有几分钟延迟**，不是「准点弹出来」；
-- 去重靠 `event_key` 和标题比对，属于提示机制，不是确定性事实引擎；
-- 备用混元会带平台水印，插件不去掉它。
+- 只在 AstrBot 4.29.3 + NapCat 上真跑过；`support_platforms` 里声明了 telegram / lark，但没实测。
+- 研究要 2–4 分钟，生图再几十秒，所以是「几分钟后到」，不是准点弹出。
+- 去重靠 `event_key` 和标题比对，属于提示层面的机制，不是确定性事实引擎。
+- 竖版靠提示词里显式写「竖版 2:3」，个别网关仍可能返回别的比例，以实际输出为准。
+- 混元能出图，但带平台水印，插件去不掉。
 
 ## 鸣谢
 
-- **OpenAI** —— `gpt-image-2` 渲染中文版面，Responses API 的 `web_search` 撑起整条研究链路。这个插件基本是踩着它的能力边界写出来的；README 里的头像和吉祥物也是它画的。
-- **Qoder** —— 开发中大量实现和重构是在 Qoder 的 Agent 里完成的，包括客户端重试策略、并发锁，以及那些安全边界。
-- **DeepSeek** —— 长上下文代码审阅和边界情况推演，帮我提前填了不少坑。
+- **OpenAI** —— `gpt-image-2` 负责版面，Responses API 的 `web_search` 撑起研究链路。README 的头像和吉祥物也是它画的。
+- **Magpie**（[yetone/magpie](https://github.com/yetone/magpie)）—— 本地模型网关。`gpt-image-2`、`hunyuan-image-alpha` 和带 `web_search` 的 Responses 请求都从它那儿中转，整套「研究 + 排版」链路才能只靠 OpenAI 兼容接口跑通。
+- **Qoder** —— 大量实现和重构在 Qoder 的 Agent 里完成，重试策略、并发锁、安全边界都出自那里。
+- **DeepSeek** —— 长上下文审代码、推演边界情况，替我挡掉了不少坑。
 
-以及 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 本体 —— 插件文档写得比很多商业项目清楚。
+以及 [AstrBot](https://github.com/AstrBotDevs/AstrBot) 本体，插件文档写得挺清楚。README 的写法参考了 [记忆日记](https://github.com/mrzhsz3210/astrbot_plugin_memory_diary)——原来插件说明可以这么写。
 
 ## License
 
