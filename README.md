@@ -199,6 +199,11 @@ runs/20261112-morning-xxxxxxxx/
 
 同一份数据目录带进程锁，不会有两个实例同时跑；但**不提供跨机分布式锁**，别多台机器共享这个目录。
 
+**日志一律走 `astrbot.api` 的 logger。** 这是 AstrBot 的上架规则：插件内不允许使用 Python 内置
+`logging` 模块。所以 `ReportService` 和 `announce` 的 `logger` 参数是必填的——少传会直接抛
+`ValueError`，不会悄悄退回内置日志。`tools/preview.py` 这类不依赖 AstrBot 的脚本在调用处
+自建最小日志器，同样不碰 `logging`。`tests/test_logging_policy.py` 会扫描整个包盯住这条。
+
 API Key 只存在 AstrBot 配置里，不写日志、不进运行元数据、不进仓库（配置里的 `secret: true` 只是 WebUI 遮罩，不加密）。管理指令要 AstrBot 管理员权限，QQ 群管不算。
 
 ## 测试

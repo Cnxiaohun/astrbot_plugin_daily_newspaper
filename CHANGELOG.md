@@ -1,5 +1,28 @@
 # 变更日志
 
+## v0.2.2
+
+这版是**上架审查的合规修正**，没有功能变化。
+
+AstrBot 插件审查要求：日志记录器必须且只能从 `astrbot.api` 导入，严禁使用 Python 内置
+`logging` 模块。此前 `core/service.py` 与 `core/announce.py` 保留了
+`logging.getLogger(__name__)` 的兜底写法——在 AstrBot 运行时主入口已传入正确 logger、
+兜底不会触发，但按规则不允许出现。
+
+修改内容：
+
+- `core/service.py`、`core/announce.py` 删除 `import logging` 与
+  `logging.getLogger(__name__)` 兜底；`logger` 改为**必填参数**，缺失时直接抛
+  `ValueError`（而不是悄悄退回内置日志），确保问题在开发阶段就暴露。
+- 日志器一律由调用方注入：`main.py` 传 `astrbot.api` 的 `logger`；
+  `tools/preview.py` 这类不依赖 AstrBot 的场景在调用处自建一个只往 stderr 打印的最小日志器，
+  同样不引入 `logging` 模块。
+- 测试里的日志替身也改为自定义空实现，测试代码同样不出现内置 `logging`。
+- 新增 `tests/test_logging_policy.py`：扫描整个插件包，禁止 `import logging`、
+  `from logging import`、`logging.getLogger/Logger/basicConfig` 等写法；
+  同时断言入口确实从 `astrbot.api` 导入 logger、`ReportService` 与 `announce`
+  在缺 logger 时会拒绝对待。以后再回退会被测试直接拦下。
+
 ## v0.2.1
 
 > 这版只做了一件破坏性的事：改名字。

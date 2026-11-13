@@ -17,6 +17,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.service import ReportService  # noqa: E402
 
 
+class ConsoleLogger:
+    """preview.py 既不该依赖 AstrBot，也不该用内置 logging 模块。
+
+    这里给服务层一个最小的日志实现，只负责把插件日志打到 stderr。
+    """
+
+    def _emit(self, level: str, msg, *args) -> None:
+        try:
+            text = msg % args if args else str(msg)
+        except (TypeError, ValueError):
+            text = f"{msg} {args}"
+        print(f"[{level}] {text}", file=sys.stderr)
+
+    def debug(self, msg, *args, **kwargs) -> None:  # noqa: D102 - 预览不需要 debug
+        pass
+
+    def info(self, msg, *args, **kwargs) -> None:
+        self._emit("INFO", msg, *args)
+
+    def warning(self, msg, *args, **kwargs) -> None:
+        self._emit("WARN", msg, *args)
+
+    def error(self, msg, *args, **kwargs) -> None:
+        self._emit("ERROR", msg, *args)
+
+    def exception(self, msg, *args, **kwargs) -> None:
+        self._emit("ERROR", msg, *args)
+
+
 def schema_defaults(items):
     return {k: schema_defaults(v["items"]) if v["type"] == "object" else v.get("default")
             for k, v in items.items()}
@@ -55,7 +84,8 @@ async def main():
             raise AssertionError("预览脚本禁止群发送")
         print("LOCAL_PREVIEW", str(path.resolve()))
         return True
-    service = ReportService(None, cfg, Path(args.output), clock=clock, sender=no_send)
+    service = ReportService(None, cfg, Path(args.output), logger=ConsoleLogger(),
+                            clock=clock, sender=no_send)
     try:
         await service.start(schedule=False)
         record = await service.run(args.slot, preview_target=target)

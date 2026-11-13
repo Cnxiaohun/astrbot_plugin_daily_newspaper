@@ -2,7 +2,7 @@ name: astrbot_plugin_daily_newspaper
 display_name: 每日报纸
 desc: 默认早中晚三档、可增删至 12 档，每档由研究 Agent 联网检索当日新增报道并核实，时间、目标群、研究提示词与版式均独立配置；强制要求 completed 搜索调用及逐条 source/url/published_at 才允许出刊。研究与排版两段解耦：结构化简报先编译成逐字文案，再由 gpt-image-2 等生图模型仅做竖版中文报纸版式排版，两端可分别指向不同 OpenAI 兼容端点（模型可由 Magpie 等本地网关中转），生图模型不承担检索与核实。同一天同一时段只生成一次，重复触发直接转发已有版本，仅 /日报 强制 走重新检索；早中晚以 event_key 与标题互斥，同一事件无实质新进展不得复现，只允许标记 UPDATE 的新进展。发送按群持久化收据并区分 sent/sending/uncertain，结果不明不自动重发，进程重启不重发已成功目标。支持主备生图模型（备用端点为实测可用，非官方适配）、失败阶段回群说明、生成前按当前会话人格口吻告知、可选视觉文字回检（默认关闭）、检索原文与简报留档可追溯；不把模型自述当作核实结论，配图为生成式排版示意而非现场照片。需 AstrBot ≥ 4.29.1 与支持主动消息的 OneBot v11 / NapCat 连接，未绑定群不产生任何 API 调用。
 short_desc: 分时段联网核实资讯，排成竖版报纸图推群；时段可增删，当天只出一次。
-version: v0.2.1
+version: v0.2.2
 author: cnxiaohun
 repo: https://github.com/Cnxiaohun/astrbot_plugin_daily_newspaper
 astrbot_version: ">=4.29.1"

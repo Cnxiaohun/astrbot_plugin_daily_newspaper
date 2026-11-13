@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 import re
 from typing import Any
 
@@ -28,7 +27,7 @@ def render(template: str, ctx: dict[str, Any]) -> str:
 
 
 async def _persona_rewrite(context, umo: str, base_text: str, timeout: int,
-                           logger: logging.Logger) -> str:
+                           logger: Any) -> str:
     """Ask the session chat provider to rephrase one line in its active persona."""
     try:
         async with asyncio.timeout(timeout):
@@ -76,10 +75,13 @@ async def announce(
     action: str,
     reuse: bool,
     sender,
-    logger: logging.Logger | None = None,
+    logger: Any,
 ) -> None:
     """Send a short heads-up to each target before generation (or before reuse)."""
-    log = logger or logging.getLogger(__name__)
+    # 与 ReportService 一致：日志器由调用方注入，模块内不自行创建。
+    if logger is None:
+        raise ValueError("announce 需要调用方传入 logger（AstrBot 内请用 astrbot.api.logger）")
+    log = logger
     try:
         if not settings.get("enabled", True):
             return

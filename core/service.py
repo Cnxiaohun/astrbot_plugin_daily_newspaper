@@ -5,10 +5,9 @@ import asyncio
 import copy
 import hashlib
 import inspect
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -54,15 +53,18 @@ def research_window(slot_id: str, now: datetime, config: dict) -> datetime:
 
 
 class ReportService:
-    def __init__(self, context, config: dict, root: Path, *, logger=None,
+    def __init__(self, context, config: dict, root: Path, *, logger: Any,
                  clock: Callable | None = None, sender=None, alerter=None,
                  research_factory=ResearchClient, image_factory=ImageClient,
                  qa_checker=check_image, announcer=announce):
+        # 日志器必须由调用方传入 astrbot.api 的 logger；插件内不使用内置 logging。
+        if logger is None:
+            raise ValueError("ReportService 需要调用方传入 logger（AstrBot 内请用 astrbot.api.logger）")
         validate_config(config)
         self.context = context
         self.config = config
         self.store = Store(root)
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger
         self.clock = clock or (lambda: datetime.now(ZoneInfo(self.config.get("timezone", "Asia/Shanghai"))))
         self.sender = sender or send_image
         self.alerter = alerter or send_alert

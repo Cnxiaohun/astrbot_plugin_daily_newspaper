@@ -18,6 +18,25 @@ from core.scheduler import is_due, next_time
 from core.service import ReportService
 from core.store import Store
 
+class NullLogger:
+    """测试用最小日志器。插件内部不允许使用内置 logging，测试同样不引入。"""
+
+    def debug(self, *args, **kwargs) -> None:
+        pass
+
+    def info(self, *args, **kwargs) -> None:
+        pass
+
+    def warning(self, *args, **kwargs) -> None:
+        pass
+
+    def error(self, *args, **kwargs) -> None:
+        pass
+
+    def exception(self, *args, **kwargs) -> None:
+        pass
+
+
 NOW = datetime(2026, 11, 12, 8, 0, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
 TARGET = "napcat-instance:GroupMessage:123456"
 TARGET2 = "napcat-instance:GroupMessage:456789"
@@ -91,7 +110,8 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.announcements = []
         async def announcer(context, umos, **kwargs):
             self.announcements.append((list(umos), kwargs))
-        self.service = ReportService(None, self.cfg, Path(self.temp.name), clock=lambda: NOW,
+        self.service = ReportService(None, self.cfg, Path(self.temp.name), logger=NullLogger(),
+                                     clock=lambda: NOW,
             sender=sender, alerter=alerter, research_factory=FakeResearch, image_factory=FakeImage,
             announcer=announcer)
         await self.service.start(schedule=False)

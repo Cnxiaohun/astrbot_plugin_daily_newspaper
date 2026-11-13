@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import logging
 import re
 import sys
 import types
@@ -12,6 +11,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 from test_service import default_config, slot_entry
+
+
+class _StubLogger:
+    """替身日志器：插件只调用 info/warning/error 等方法，测试不引入内置 logging。"""
+
+    def debug(self, *args, **kwargs) -> None:
+        pass
+
+    def info(self, *args, **kwargs) -> None:
+        pass
+
+    def warning(self, *args, **kwargs) -> None:
+        pass
+
+    def error(self, *args, **kwargs) -> None:
+        pass
+
+    def exception(self, *args, **kwargs) -> None:
+        pass
 
 
 def load_entry():
@@ -61,7 +79,7 @@ def load_entry():
         r'__version__\s*=\s*"([\d.]+)"', _init.read_text(encoding="utf-8")
     ).group(1)
     modules["astrbot.api"].AstrBotConfig = dict
-    modules["astrbot.api"].logger = logging.getLogger("main-contract")
+    modules["astrbot.api"].logger = _StubLogger()
     eventmod = modules["astrbot.api.event"]
     eventmod.AstrMessageEvent = object
     eventmod.filter = Filter
