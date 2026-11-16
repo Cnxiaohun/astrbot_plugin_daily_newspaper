@@ -87,7 +87,8 @@ HELP = """每日报纸 · 用法
 ▌目标群
   /日报 绑定 早报|全部       把当前群加入该时段
   /日报 解绑 早报|全部       从该时段移除当前群
-  /日报 重发 <run_id> [确认] 复用旧图重发；「确认」允许重发结果不明的目标
+  /日报 重发 <run_id> [确认] [jpeg]
+                             复用旧图；确认=接受结果不明时可能重复；jpeg=原尺寸 JPEG 副本
 
 ▌说明
   时段可写名称或 id；内置三档还支持 早/午/晚、morning/noon/evening。
@@ -130,6 +131,16 @@ class DailyImageReport(Star):
         self.service = ReportService(self.context, self.config, data, logger=logger)
         try:
             await self.service.start()
+            # Registered through AstrBot's authenticated plugin dispatcher.
+            if self.context is not None:
+                from .core.operations import DashboardOperations
+                operations = DashboardOperations(self)
+                self.context.register_web_api(f"/{PLUGIN_NAME}/runs", operations.recent,
+                                              ["GET"], "查看脱敏发送收据（后台认证）")
+                self.context.register_web_api(f"/{PLUGIN_NAME}/resend", operations.resend,
+                                              ["POST"], "人工补发已有刊物（后台认证）")
+                self.context.register_web_api(f"/{PLUGIN_NAME}/health", operations.health,
+                                              ["GET"], "只读检查当前 OneBot 连接及目标群（后台认证）")
         except BaseException:
             await self.service.close()
             raise
@@ -319,17 +330,24 @@ class DailyImageReport(Star):
                 if not 1 <= count <= 20:
                     raise ValueError("历史数量须为 1-20")
                 rows = service.store.recent(count)
-                lines = [
-                    f"{'预览' if r.get('preview') else '正式'} {r['slot_name']} {r['status']}\n"
-                    f"{r['run_id']} {r.get('image_model', '')}\n{r.get('error', '')}"
-                    for r in rows
-                ]
+                lines = []
+                for r in rows:
+                    detail = [f"{'预览' if r.get('preview') else '正式'} {r['slot_name']} {r['status']}",
+                              f"{r['run_id']} {r.get('image_model', '')}", r.get('error', '')]
+                    for target, receipt in list(r.get('receipts', {}).items())[:12]:
+                        error = safe_error(RuntimeError(str(receipt['error'])), self.config) if receipt.get('error') else ''
+                        detail.append(f"{target}: {receipt.get('status', 'unknown')} {error}")
+                    lines.append('\n'.join(line for line in detail if line))
                 yield event.plain_result("\n\n".join(lines) or "暂无运行记录")
             elif action == "resend":
                 if not extras:
-                    raise ValueError("格式：/日报 重发 <run_id> [确认]")
-                confirm = bool(extras[1:]) and extras[1] in {"确认", "confirm", "yes"}
-                result = await service.resend(extras[0], retry_uncertain=confirm)
+                    raise ValueError("格式：/日报 重发 <run_id> [确认] [jpeg]")
+                flags = extras[1:]
+                if any(flag not in {"确认", "confirm", "yes", "jpeg"} for flag in flags):
+                    raise ValueError("格式：/日报 重发 <run_id> [确认] [jpeg]")
+                confirm = any(flag in {"确认", "confirm", "yes"} for flag in flags)
+                result = await service.resend(extras[0], retry_uncertain=confirm,
+                                              image_format="jpeg" if "jpeg" in flags else "original")
                 if result.get("status") != "success":
                     yield event.plain_result(result.get("message") or result.get("error") or "重发未完成")
             elif action in {"enable", "disable"}:

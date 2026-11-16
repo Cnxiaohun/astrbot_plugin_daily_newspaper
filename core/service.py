@@ -14,7 +14,7 @@ import httpx
 
 from .announce import announce
 from .config import get_slot, load_slots, previous_edition_time, validate_config, validate_targets
-from .delivery import send_alert, send_image
+from .delivery import jpeg_delivery_copy, send_alert, send_image
 from .http_utils import AmbiguousRequestError, ConnectionFailure
 from .image_client import ImageClient
 from .prompt_builder import PromptBuilder, now_parts
@@ -85,6 +85,18 @@ class ReportService:
     async def start(self, *, schedule: bool = True) -> None:
         self.store.acquire()
         await self.store.recover()
+        # Surface persisted delivery errors without exposing private JSON files or
+        # sending diagnostic chatter to groups. Never retry as a side effect of start.
+        for record in self.store.recent(12):
+            if record.get("date") != self.clock().date().isoformat():
+                continue
+            for target, receipt in record.get("receipts", {}).items():
+                if receipt.get("status") in {"unmatched", "uncertain", "failed"}:
+                    self.logger.warning(
+                        "图报发送收据 run=%s target=%s status=%s error=%s",
+                        record["run_id"], target, receipt.get("status"),
+                        safe_error(RuntimeError(str(receipt.get("error", ""))), self.config),
+                    )
         if schedule:
             self._scheduler_task = self.spawn(self._scheduler(), "daily-report-scheduler")
 
@@ -362,10 +374,15 @@ class ReportService:
         await self.store.save(record)
         return await self._deliver(record, record["targets"], cfg, force=force)
 
-    async def _deliver(self, record: dict, targets: list[str], cfg: dict, *, force: bool) -> dict:
+    async def _deliver(self, record: dict, targets: list[str], cfg: dict, *, force: bool,
+                       image_format: str = "original") -> dict:
+        if image_format not in {"original", "jpeg"}:
+            raise ValueError("传输格式只允许 original 或 jpeg")
         image = self.store.run_dir(record["run_id"]) / record["image_file"]
         if image.name != record["image_file"] or not image.is_file():
             raise ValueError("历史图片不存在或路径无效，无法重发")
+        if image_format == "jpeg":
+            image = await asyncio.to_thread(jpeg_delivery_copy, image)
         record.update(stage="delivery", status="running", targets=list(dict.fromkeys(record.get("targets", []) + targets)))
         prior = {} if record.get("preview") else self.store.receipts(record["slot_id"], record["date"])
         for target in targets:
@@ -383,7 +400,11 @@ class ReportService:
                 continue
             if not force and state in {"sending", "uncertain"}:
                 continue
-            record["receipts"][target] = {"status": "sending", "at": self.clock().isoformat()}
+            previous = record["receipts"].get(target, {})
+            attempts = int(previous.get("attempts", 0)) + 1
+            record["receipts"][target] = {"status": "sending", "at": self.clock().isoformat(),
+                                          "attempts": attempts, "image_format": image_format,
+                                          "previous_error": previous.get("error", "")}
             await self.store.save(record)  # persist BEFORE the side effect
             try:
                 matched = await self.sender(self.context, target, image)
@@ -393,6 +414,8 @@ class ReportService:
                 raise
             except Exception as exc:
                 record["receipts"][target].update(status="uncertain", error=safe_error(exc, cfg))
+                self.logger.warning("图报发送失败 run=%s target=%s error=%s",
+                                    record["run_id"], target, safe_error(exc, cfg))
             else:
                 record["receipts"][target]["status"] = "sent" if matched is True else "unmatched"
             await self.store.save(record)
@@ -401,7 +424,14 @@ class ReportService:
         success = all(combined.get(t) == "sent" for t in targets)
         record.update(status="success" if success else "partial", stage="finished", finished_at=self.clock().isoformat())
         if not success:
-            record["error"] = "部分平台未匹配或发送结果不明；不自动重发以避免重复。查看 receipts 后人工处理。"
+            details = []
+            for target in targets:
+                receipt = record["receipts"].get(target, {})
+                state = combined.get(target) or receipt.get("status", "unknown")
+                if state != "sent":
+                    reason = receipt.get("error") or ("未匹配到平台实例" if state == "unmatched" else "未确认成功")
+                    details.append(f"{target}: {state} {reason}")
+            record["error"] = "未全部发送成功（不代表已有群收到）；结果不明不自动重发。\n" + "\n".join(details[:12])
         else:
             record["error"] = ""
         await self.store.save(record)
@@ -410,7 +440,10 @@ class ReportService:
         self.logger.info("图报 %s %s（%s）", record["run_id"], record["status"], record.get("image_model", ""))
         return record
 
-    async def resend(self, run_id: str, *, retry_uncertain: bool = False) -> dict:
+    async def resend(self, run_id: str, *, retry_uncertain: bool = False,
+                     image_format: str = "original") -> dict:
+        if image_format not in {"original", "jpeg"}:
+            raise ValueError("传输格式只允许 original 或 jpeg")
         if not self.config.get("enabled", True):
             raise ValueError("插件停用中，不能重发")
         initial = self.store.get(run_id)
@@ -444,7 +477,8 @@ class ReportService:
                 return {"status": "skipped", "message": "所有原目标已有成功记录，未重复发送"}
             if not retry_uncertain and any(prior.get(t) in {"sending", "uncertain"} for t in targets):
                 raise ValueError("存在结果不明记录；确定接受可能重复，请 /日报 重发 run_id 确认")
-            return await self._deliver(record, targets, copy.deepcopy(dict(self.config)), force=retry_uncertain)
+            return await self._deliver(record, targets, copy.deepcopy(dict(self.config)),
+                                       force=retry_uncertain, image_format=image_format)
 
     async def _alert(self, record: dict, cfg: dict) -> None:
         target = cfg.get("alert_umo", "")

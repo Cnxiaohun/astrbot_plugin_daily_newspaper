@@ -181,6 +181,34 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("success", statuses)
         self.assertIn("skipped", statuses)
 
+    async def test_manual_jpeg_resend_reuses_image_and_records_encoding(self):
+        from PIL import Image
+        async def ambiguous(*args):
+            raise TimeoutError("callback timeout")
+        self.service.sender = ambiguous
+        r = await self.service.run("morning")
+        original = self.service.store.run_dir(r["run_id"]) / r["image_file"]
+        Image.new("RGB", (1024, 1536), "white").save(original)
+        before = original.read_bytes()
+        calls = []
+        async def sender(ctx, target, path):
+            with Image.open(path) as image:
+                self.assertEqual((image.format, image.size), ("JPEG", (1024, 1536)))
+            calls.append(target)
+            return True
+        self.service.sender = sender
+        with self.assertRaisesRegex(ValueError, "结果不明"):
+            await self.service.resend(r["run_id"], image_format="jpeg")
+        result = await self.service.resend(r["run_id"], retry_uncertain=True, image_format="jpeg")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["receipts"][TARGET]["image_format"], "jpeg")
+        self.assertEqual(result["receipts"][TARGET]["attempts"], 2)
+        self.assertEqual(original.read_bytes(), before)
+        self.assertEqual(FakeImage.calls, 1)
+        self.assertEqual(calls, [TARGET])
+        await self.service.resend(r["run_id"], retry_uncertain=True, image_format="jpeg")
+        self.assertEqual(calls, [TARGET])
+
     async def test_no_target_costs_nothing(self):
         slot_entry(self.cfg, "morning")["targets"] = []
         with self.assertRaisesRegex(ValueError, "目标群"):

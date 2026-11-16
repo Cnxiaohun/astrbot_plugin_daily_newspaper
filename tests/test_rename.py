@@ -91,6 +91,27 @@ class InitializeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(calls.get("start"))
             self.assertEqual(calls["data"].name, ENTRY.PLUGIN_NAME)
 
+    async def test_operations_registration_failure_closes_started_service(self):
+        from unittest.mock import AsyncMock, Mock, patch
+        from test_service import default_config
+        import importlib
+        import sys
+        root_module = sys.modules.get(ENTRY.__package__)
+        if root_module is None:
+            root_module = types.ModuleType(ENTRY.__package__)
+            root_module.__path__ = [str(Path(__file__).parents[1])]
+        with tempfile.TemporaryDirectory() as tmp:
+            context = types.SimpleNamespace(register_web_api=Mock(side_effect=RuntimeError("registration failed")))
+            plugin = ENTRY.DailyImageReport(context, test_main.Config(default_config()))
+            service = types.SimpleNamespace(start=AsyncMock(), close=AsyncMock())
+            with patch.dict(sys.modules, {ENTRY.__package__: root_module}), \
+                 patch.object(ENTRY, "ReportService", return_value=service), \
+                 patch.object(ENTRY, "StarTools") as tools:
+                tools.get_data_dir.return_value = Path(tmp) / ENTRY.PLUGIN_NAME
+                with self.assertRaisesRegex(RuntimeError, "registration failed"):
+                    await plugin.initialize()
+            service.close.assert_awaited_once()
+
     def test_versions_agree_everywhere(self):
         """metadata / __init__ / 启动日志不能各说各话。"""
         import re

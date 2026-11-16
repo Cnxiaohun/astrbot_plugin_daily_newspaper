@@ -271,6 +271,25 @@ class MainTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(calls[0]["force"])
         self.assertEqual(calls[0]["preview_target"], "")
 
+    async def test_manual_resend_parses_confirmation_and_encoding(self):
+        from unittest.mock import AsyncMock
+        resend = AsyncMock(return_value={"status": "success"})
+        self.plugin.service = types.SimpleNamespace(resend=resend)
+        replies = [r async for r in self.plugin.report(Event('/日报 重发 saved 确认 jpeg'))]
+        self.assertEqual(replies, [])
+        resend.assert_awaited_once_with('saved', retry_uncertain=True, image_format='jpeg')
+        replies = [r async for r in self.plugin.report(Event('/日报 重发 saved typo'))]
+        self.assertIn('格式', replies[0])
+        self.assertEqual(resend.await_count, 1)
+
+    async def test_history_exposes_actual_redacted_group_errors(self):
+        row = {"run_id": "saved", "slot_name": "早报", "status": "partial", "receipts": {
+            "bot:GroupMessage:123": {"status": "uncertain", "error": "kernel callback timeout"}}}
+        self.plugin.service = types.SimpleNamespace(store=types.SimpleNamespace(recent=lambda count: [row]))
+        replies = [r async for r in self.plugin.report(Event('/日报 历史 1'))]
+        self.assertIn('bot:GroupMessage:123: uncertain', replies[0])
+        self.assertIn('kernel callback timeout', replies[0])
+
     async def test_delivery_chain_contains_only_image(self):
         from core.delivery import send_image
         captured = []

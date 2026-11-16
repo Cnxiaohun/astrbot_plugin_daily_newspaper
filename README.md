@@ -136,11 +136,39 @@ Docker 里的 AstrBot 注意 `127.0.0.1` 指容器自己，要换成宿主地址
 | `/日报 时间 早报 07:30` | 改时间 |
 | `/日报 绑定 早报` / `绑定 全部` | 当前群加入该档 |
 | `/日报 解绑 早报` / `解绑 全部` | 当前群移出该档 |
-| `/日报 重发 <run_id> [确认]` | 拿旧图重发；`确认` 才动「结果不明」的群 |
+| `/日报 重发 <run_id> [确认] [jpeg]` | 拿旧图重发；`确认` 接受结果不明时可能重复；`jpeg` 使用原尺寸 JPEG 副本，不重新生图 |
 
 自定义档位直接用它的名称或 id（`/日报 测试 夜报`）。内置三档还额外认 `早/午/晚`、`morning/noon/evening` 这些简写；老写法 `/日报测试 早报` 也还在。
 
 参数拼错会告诉你「是不是想打『强制』」，而不是闷头执行——一次强制就是真金白银。
+
+### 图片已生成但群里没收到
+
+先看 `/日报 历史 1` 的逐群收据：`partial` 只代表未全部成功，**也可能所有群都没收到**。
+`sent` 代表适配器正常返回，不是用户阅读回执；`uncertain` 代表结果不明，不能自动当作“没发出去”。
+
+例如 NapCat 返回 `retcode=1200`，并报告 `NodeIKernelMsgService/sendMsg` 等待
+`onMsgInfoListUpdate` 超时，属于提交后的确认异常。即使查询显示 `online=true`，也不能证明发图通道正常。
+先核对群里实际情况、NapCat 日志，再人工决定是否接受重复风险：
+
+```text
+/日报 重发 <run_id> 确认
+/日报 重发 <run_id> 确认 jpeg
+```
+
+两种都复用已有报纸，后者只转成同尺寸 JPEG 副本（原图不动）。不要为了补发用“强制”重新计费生图。
+PNG、JPEG 都超时的情况下，不应无限重试或声称压缩已经解决故障。
+
+后台维护接口（AstrBot 4.29.3 已验证；必须登录后台，未认证返回 401）：
+
+- `GET /api/v1/plugins/extensions/astrbot_plugin_daily_newspaper/runs`：最近 20 次的脱敏发送收据。
+- `GET /api/v1/plugins/extensions/astrbot_plugin_daily_newspaper/health`：只读查询当前目标的 OneBot 状态、版本、登录账号和群信息；不读取聊天历史，不发测试消息。
+- `POST /api/v1/plugins/extensions/astrbot_plugin_daily_newspaper/resend`：JSON 为
+  `{"run_id":"运行编号","retry_uncertain":false,"image_format":"original"}`。
+  只有人工接受重复风险才设 `retry_uncertain=true`；`image_format` 可为 `original` 或 `jpeg`。
+  顶层 `status=ok` 仅表示请求执行完，必须继续核对 `data.status` 和每个群的 `receipts`。
+
+这些接口不接受任意文件路径、任意收件群或任意 OneBot 动作；仍复用插件原本的锁、当前绑定和已成功不重发规则。
 
 ## 备用模型
 
